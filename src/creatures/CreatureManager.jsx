@@ -1,9 +1,9 @@
-import { useRef, useMemo, useEffect } from 'react'
+import { useRef, useMemo, useEffect, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { getTerrainHeight } from '../components/Terrain'
 import { WORLD_ITEMS, OBSTACLES, findValidResourcePosition } from '../worldData'
 import SPECIES from './species'
-import { createAllCreatures } from './creatureData'
+import { createAllCreatures, createCreature } from './creatureData'
 import { loadCreatures, loadWorldClock, saveCreatures, saveWorldClock, loadResourceStates, saveResourceStates, loadSpeciesMemory, saveSpeciesMemory } from './creatureStore'
 import { updateCreature, createFoodSources, updateFoodSources } from './behaviors'
 import { scoreItem, recordDeath } from './scoring'
@@ -22,7 +22,7 @@ function createDefaultResourceStates() {
   }))
 }
 
-export default function CreatureManager({ controlsRef, selectedId, followingId, onSelect, onSync, resourceStatesRef }) {
+export default function CreatureManager({ controlsRef, selectedId, followingId, onSelect, onSync, resourceStatesRef, speedRef, debugRef, debugOpen, showAllThinking }) {
   const initialData = useMemo(() => {
     const loaded = loadCreatures()
     if (loaded && loaded.length > 0) {
@@ -38,8 +38,22 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         equipment: { weapon: null, armor: null },
         strategyMemory: [],
         justCrafted: null, justDropped: null, _craftCooldown: 0,
+        crafting: false, craftTimer: 0, craftDuration: 0, craftRecipe: null,
+        drinkingPotion: false, potionTimer: 0, potionDuration: 0,
+        potionHealTotal: 0, potionHealedSoFar: 0, potionStarted: null, justUsedPotion: null,
         dropFloatText: null, dropFloatColor: null,
         _gatherGoal: null, _wantsCraftNow: false, _decisionTimer: 0,
+        inCombat: false, _combatTarget: null, _combatCooldown: 0,
+        _hitTimer: 0, _fleeTimer: 0,
+        combatHitDealt: null, combatHitTaken: null,
+        combatKill: null, combatDeath: null,
+        combatEngaged: null, combatFled: null, combatInterrupted: false,
+        _combatDuration: 0, _combatTurns: 0,
+        _fleeAttempts: 0, _scaredTimer: 0, _scaredOfId: null, _fleeSprint: 0, _fleeFromX: 0, _fleeFromZ: 0,
+        _chasing: false, _chaseTargetId: null, _chaseTimer: 0, _fleeMinDist: 0,
+        combatChaseStarted: null, combatChaseCaught: null, combatChaseEscaped: null, combatChaseGaveUp: null,
+        combatIntimidated: null, equipmentBroke: null, equipmentLow: null,
+        deathCause: null, killedBy: null, justLeveledUp: null,
         ...c,
       }))
     }
@@ -70,6 +84,26 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
   const dropIdCounter = useRef(0)
   const lastRealTimeRef = useRef(Date.now())
   const simulatingRef = useRef(false)
+
+  // ── Debug: spawn API + re-render trigger ───────────────────
+  const [creatureCount, setCreatureCount] = useState(creaturesRef.current.length)
+
+  useEffect(() => {
+    if (!debugRef) return
+    debugRef.current = {
+      creaturesRef,
+      spawn: (speciesName, x, z) => {
+        const idx = creaturesRef.current.length
+        const positions = creaturesRef.current.map(c => [c.x, c.z])
+        const c = createCreature(speciesName, idx, positions)
+        c.x = x; c.z = z
+        creaturesRef.current.push(c)
+        setCreatureCount(creaturesRef.current.length)
+        return c.id
+      },
+      getCreature: (id) => creaturesRef.current.find(c => c.id === id),
+    }
+  }, [debugRef, creatureCount])
 
   // ── Core simulation step ────────────────────────────────────
   // Processes dt seconds of game time. When catching=true (catch-up mode),
@@ -210,12 +244,176 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         if (logRef.current.length > 50) logRef.current.pop()
       }
 
-      // Potion usage logging
-      if (c.alive && c.justUsedPotion) {
-        c.justUsedPotion = false
+      // Potion started drinking logging
+      if (c.alive && c.potionStarted) {
+        const label = c.potionStarted.label || 'Healing Potion'
         logRef.current.unshift({
           time: worldClockRef.current,
-          msg: `${c.name} used a Healing Potion (+40 HP)`,
+          msg: `${c.name} is drinking ${label}...`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+        c.potionStarted = null
+      }
+
+      // Potion finished logging (flag is consumed by Creature.jsx for visuals)
+      if (c.alive && c.justUsedPotion) {
+        const healAmt = c.justUsedPotion.healAmount || 40
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} restored ${healAmt} HP from Healing Potion`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+      }
+
+      // Combat engagement logging
+      if (c.combatEngaged) {
+        const eng = c.combatEngaged
+        c.combatEngaged = null
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} attacks ${eng.targetName}!`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+      }
+      if (c.combatInterrupted) {
+        c.combatInterrupted = false
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} was ambushed and forced into combat!`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+      }
+      if (c.combatFled) {
+        const fled = c.combatFled
+        c.combatFled = null
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} fled from battle with ${fled.opponentName}! (HP: ${fled.hp}/${fled.maxHp})`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+      }
+      // Intimidation logging
+      if (c.combatIntimidated) {
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} backed away from ${c.combatIntimidated.opponentName} (too dangerous)`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+        // Don't clear — Creature.jsx consumes for visuals
+      }
+      // Chase event logging
+      if (c.combatChaseStarted) {
+        const chase = c.combatChaseStarted
+        c.combatChaseStarted = null
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} is chasing ${chase.targetName}!`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+      }
+      if (c.combatChaseCaught) {
+        const chase = c.combatChaseCaught
+        c.combatChaseCaught = null
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} caught ${chase.targetName}! Combat resumes!`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+      }
+      if (c.combatChaseEscaped) {
+        const chase = c.combatChaseEscaped
+        c.combatChaseEscaped = null
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} escaped from ${chase.chaserName}!`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+      }
+      if (c.combatChaseGaveUp) {
+        const chase = c.combatChaseGaveUp
+        c.combatChaseGaveUp = null
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} gave up chasing ${chase.targetName}`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+      }
+      // Equipment break logging
+      if (c.equipmentBroke) {
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name}'s ${c.equipmentBroke.itemLabel} broke during combat!`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+        // Don't clear — Creature.jsx consumes for visuals
+      }
+      // Equipment low durability warning
+      if (c.equipmentLow) {
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name}'s ${c.equipmentLow.itemLabel} is about to break!`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+        c.equipmentLow = null // No visual for this, just a log
+      }
+
+      // Combat kill logging
+      if (c.combatKill) {
+        const kill = c.combatKill
+        c.combatKill = null
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} defeated ${kill.victimName}! (+${kill.xpGain} XP)`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+        if (kill.looted.length > 0) {
+          const lootNames = kill.looted.map(t => ITEM_LABELS[t] || t).join(', ')
+          logRef.current.unshift({
+            time: worldClockRef.current,
+            msg: `${c.name} looted: ${lootNames}`,
+            species: c.species,
+          })
+          if (logRef.current.length > 50) logRef.current.pop()
+        }
+      }
+
+      // Combat death logging (on the dead creature)
+      const diedInCombat = !!c.combatDeath
+      if (c.combatDeath) {
+        const death = c.combatDeath
+        c.combatDeath = null
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} has been slain by ${death.killerName}!`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+        // Record death in species memory
+        recordDeath(c, speciesMemory)
+        if (!speciesMemory[c.species]) speciesMemory[c.species] = { starvation: 0, lowHp: 0 }
+        if (!speciesMemory[c.species].combatDeaths) speciesMemory[c.species].combatDeaths = 0
+        speciesMemory[c.species].combatDeaths++
+      }
+
+      // Level-up logging
+      if (c.justLeveledUp) {
+        const lv = c.justLeveledUp
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} reached Level ${lv.newLevel}! (+${lv.hpGain} HP, +${lv.atkGain} ATK, +${lv.spdGain} SPD)`,
           species: c.species,
         })
         if (logRef.current.length > 50) logRef.current.pop()
@@ -229,9 +427,14 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
           msg = `${c.name} woke up (energy: ${Math.round(c.energy)})`
         } else if (prevState === 'eating' && c.state !== 'eating') {
           msg = `${c.name} finished eating (+${c.lastHungerGain} hunger)`
+        } else if (c.state === 'crafting' && c.craftRecipe) {
+          msg = `${c.name} started crafting ${c.craftRecipe.label}`
         } else if (c.state === 'gathering') {
           const verb = GATHER_VERBS[c.targetResourceType] || 'gathering'
           msg = `${c.name} is ${verb}`
+        } else if (c.state === 'fighting') {
+          const target = creatures.find(t => t.id === c._combatTarget)
+          msg = target ? `${c.name} is fighting ${target.name}!` : `${c.name} is fighting!`
         } else if (c.state === 'seeking resource' && c._gatherGoal?.reason) {
           msg = `${c.name}: ${c._gatherGoal.reason}`
         } else {
@@ -244,7 +447,8 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         })
         if (logRef.current.length > 50) logRef.current.pop()
       }
-      if (!c.alive && wasAlive) {
+      if (!c.alive && wasAlive && !diedInCombat) {
+        // Non-combat death (starvation etc) — combat deaths are logged separately
         recordDeath(c, speciesMemory)
         logRef.current.unshift({
           time: worldClockRef.current,
@@ -259,6 +463,23 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         c.gatherResult = null
         c.foundCrystal = false
         c.justCrafted = null
+        c.justUsedPotion = null
+        c.potionStarted = null
+        c.combatHitDealt = null
+        c.combatHitTaken = null
+        c.combatKill = null
+        c.combatDeath = null
+        c.combatEngaged = null
+        c.combatFled = null
+        c.combatInterrupted = false
+        c.combatIntimidated = null
+        c.combatChaseStarted = null
+        c.combatChaseCaught = null
+        c.combatChaseEscaped = null
+        c.combatChaseGaveUp = null
+        c.equipmentBroke = null
+        c.equipmentLow = null
+        c.justLeveledUp = null
       }
     }
 
@@ -327,7 +548,8 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
       simulatingRef.current = true
 
       // Process up to 10s of sim time per background tick (in chunks)
-      let toProcess = Math.min(elapsed, 10.0)
+      const bgSpeed = speedRef?.current ?? 1
+      let toProcess = Math.min(elapsed, 10.0) * bgSpeed
       // Only advance the clock by what we actually process — rest is caught up later
       lastRealTimeRef.current += toProcess * 1000
 
@@ -381,6 +603,10 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
 
     // Cap catch-up at 30 minutes to avoid freezing
     totalElapsed = Math.min(totalElapsed, 1800)
+
+    // Apply debug speed multiplier
+    const simSpeed = speedRef?.current ?? 1
+    totalElapsed *= simSpeed
 
     const isCatchUp = totalElapsed > 0.1
 
@@ -454,6 +680,7 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
           index={i}
           isSelected={selectedId === c.id}
           onSelect={onSelect}
+          showAllThinking={showAllThinking}
         />
       ))}
     </>

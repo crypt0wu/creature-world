@@ -1,75 +1,81 @@
 import { getTerrainHeight, getZoneDensity } from './components/Terrain'
 
-function seededRandom(seed) {
-  const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453
-  return x - Math.floor(x)
-}
-
 // ─── Pond definitions (matching Terrain.jsx depressions) ───
 export const PONDS = [
   { cx: 15, cz: -5, radius: 10 },
   { cx: -30, cz: 25, radius: 6 },
 ]
 
+// ─── Check if a point is inside or near a pond ───────────
+function isNearPond(x, z, buffer) {
+  for (let i = 0; i < PONDS.length; i++) {
+    const dx = x - PONDS[i].cx, dz = z - PONDS[i].cz
+    if (dx * dx + dz * dz < (PONDS[i].radius + buffer) ** 2) return true
+  }
+  return false
+}
+
 // ─── Generate world items (trees, rocks, bushes) ───────────
-// Single source of truth — used by Trees.jsx for rendering
-// and Wildlife.jsx for collision avoidance
+// Uses Math.random() so each game/reset has a unique layout
 function generateWorldItems() {
   const items = []
   const SPREAD = 180
 
-  // Trees — density-driven placement
+  // Trees — density-driven placement with pond avoidance
   for (let i = 0; i < 250; i++) {
-    const x = (seededRandom(i * 3) - 0.5) * SPREAD
-    const z = (seededRandom(i * 3 + 1) - 0.5) * SPREAD
+    const x = (Math.random() - 0.5) * SPREAD
+    const z = (Math.random() - 0.5) * SPREAD
+    if (isNearPond(x, z, 5)) continue
     const density = getZoneDensity(x, z)
-    if (seededRandom(i * 3 + 99) > density + 0.1) continue
+    if (Math.random() > density + 0.1) continue
     const y = getTerrainHeight(x, z)
     if (y < -1.0) continue
-    const s = 0.7 + seededRandom(i * 3 + 2) * 1.5
-    const v = seededRandom(i * 7)
+    const s = 0.7 + Math.random() * 1.5
+    const v = Math.random()
     items.push({
       type: 'tree',
       pos: [x, y, z],
       scale: s,
       variant: v,
-      collisionRadius: (1.2 + 0.4) * s,  // match visual crown radius
+      collisionRadius: (1.2 + 0.4) * s,
       key: `tree-${i}`,
     })
   }
 
-  // Rocks — scattered everywhere, denser on hills
+  // Rocks — scattered everywhere
   for (let i = 0; i < 80; i++) {
-    const x = (seededRandom(i * 5 + 1000) - 0.5) * SPREAD
-    const z = (seededRandom(i * 5 + 1001) - 0.5) * SPREAD
+    const x = (Math.random() - 0.5) * SPREAD
+    const z = (Math.random() - 0.5) * SPREAD
+    if (isNearPond(x, z, 4)) continue
     const y = getTerrainHeight(x, z)
     if (y < -0.5) continue
-    const s = 0.4 + seededRandom(i * 5 + 1002) * 2.5
+    const s = 0.4 + Math.random() * 2.5
     items.push({
       type: 'rock',
       pos: [x, y + 0.1, z],
       scale: s,
-      collisionRadius: 0.5 * s + 0.5,  // match visual rock size
+      collisionRadius: 0.5 * s + 0.5,
       key: `rock-${i}`,
     })
   }
 
   // Bushes — favor edges of forests and clearings
   for (let i = 0; i < 150; i++) {
-    const x = (seededRandom(i * 4 + 2000) - 0.5) * SPREAD
-    const z = (seededRandom(i * 4 + 2001) - 0.5) * SPREAD
+    const x = (Math.random() - 0.5) * SPREAD
+    const z = (Math.random() - 0.5) * SPREAD
+    if (isNearPond(x, z, 3)) continue
     const density = getZoneDensity(x, z)
     if (density < 0.05 || density > 0.8) {
-      if (seededRandom(i * 4 + 2099) > 0.3) continue
+      if (Math.random() > 0.3) continue
     }
     const y = getTerrainHeight(x, z)
     if (y < -0.5) continue
-    const s = 0.5 + seededRandom(i * 4 + 2002) * 1.2
+    const s = 0.5 + Math.random() * 1.2
     items.push({
       type: 'bush',
       pos: [x, y + 0.15, z],
       scale: s,
-      collisionRadius: 0.6 * s + 0.3,  // match visual bush size
+      collisionRadius: 0.6 * s + 0.3,
       key: `bush-${i}`,
     })
   }
@@ -77,14 +83,31 @@ function generateWorldItems() {
   return items
 }
 
-export const WORLD_ITEMS = generateWorldItems()
+// ─── Mutable world item arrays (mutated in-place on regenerate) ───
+export const WORLD_ITEMS = []
+export const OBSTACLES = []
 
-// ─── Flat obstacle list for fast collision checks ──────────
-export const OBSTACLES = WORLD_ITEMS.map(item => ({
-  x: item.pos[0],
-  z: item.pos[2],
-  radius: item.collisionRadius,
-}))
+function _populate() {
+  WORLD_ITEMS.length = 0
+  OBSTACLES.length = 0
+  const items = generateWorldItems()
+  for (let i = 0; i < items.length; i++) {
+    WORLD_ITEMS.push(items[i])
+    OBSTACLES.push({
+      x: items[i].pos[0],
+      z: items[i].pos[2],
+      radius: items[i].collisionRadius,
+    })
+  }
+}
+
+// Generate on initial module load
+_populate()
+
+// ─── Regenerate all world items (called on reset) ────────
+export function regenerateWorld() {
+  _populate()
+}
 
 // ─── Find a valid position for a resource to respawn ────────
 export function findValidResourcePosition(type) {
@@ -97,13 +120,9 @@ export function findValidResourcePosition(type) {
     if (type === 'tree' && y < -1.0) continue
     if ((type === 'rock' || type === 'bush') && y < -0.5) continue
 
-    let blocked = false
-    for (let i = 0; i < PONDS.length; i++) {
-      const dx = x - PONDS[i].cx, dz = z - PONDS[i].cz
-      if (Math.sqrt(dx * dx + dz * dz) < PONDS[i].radius + 4) { blocked = true; break }
-    }
-    if (blocked) continue
+    if (isNearPond(x, z, 4)) continue
 
+    let blocked = false
     for (let i = 0; i < OBSTACLES.length; i++) {
       const dx = x - OBSTACLES[i].x, dz = z - OBSTACLES[i].z
       if (Math.sqrt(dx * dx + dz * dz) < OBSTACLES[i].radius + 2) { blocked = true; break }

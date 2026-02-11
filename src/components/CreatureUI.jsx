@@ -49,6 +49,35 @@ function generateThinkingText(c) {
   const herbCount = counts.herb || 0
   const invFull = inv.length >= MAX_INVENTORY
 
+  if (c._chasing) {
+    return "They're running! I can catch them if I'm fast enough..."
+  }
+
+  if (c._fleeSprint > 0) {
+    return "Running for my life! Need to get far away before they catch up."
+  }
+
+  if (c._scaredTimer > 0) {
+    if (hpPct < 0.3) return "Badly hurt and terrified. Need to get far away and find healing..."
+    return "Not safe here... need to keep moving. Can't stop until I'm sure they're gone."
+  }
+
+  if (c.drinkingPotion) {
+    const pct = c.potionDuration > 0 ? Math.round((1 - c.potionTimer / c.potionDuration) * 100) : 0
+    return `Drinking a Healing Potion... ${pct}% done. Can't move while drinking.`
+  }
+
+  if (c.inCombat) {
+    const hpRatio = c.hp / c.maxHp
+    if (hpRatio < 0.3) return "This fight is going badly... I need to escape!"
+    if (hpRatio < 0.5) return "Taking heavy damage. Should I flee or fight to the end?"
+    if (c.equipment?.weapon?.durability !== undefined && c.equipment.weapon.durability < 10) {
+      return "My weapon is about to break! Need to end this fight quickly."
+    }
+    if (c.equipment?.weapon) return "Fighting! My weapon gives me an edge in this battle."
+    return "In combat! Trading blows with the enemy."
+  }
+
   if (c.sleeping) {
     if (c.energy < 10) return "Zzz... energy critically low. Need to rest before doing anything."
     if (hpPct < 0.5) return "Zzz... resting to recover HP. Vulnerable right now..."
@@ -58,6 +87,11 @@ function generateThinkingText(c) {
   if (c.eating) {
     if (c.hunger < 15) return "Starving! Eating as fast as I can."
     return "Eating to restore hunger. Should be good for a while after this."
+  }
+
+  if (c.crafting && c.craftRecipe) {
+    const pct = c.craftDuration > 0 ? Math.round((1 - c.craftTimer / c.craftDuration) * 100) : 0
+    return `Crafting ${c.craftRecipe.label}... ${pct}% complete. Vulnerable while working.`
   }
 
   if (c.gathering) {
@@ -100,6 +134,22 @@ function generateThinkingText(c) {
   if (c.state === 'tired') {
     if (c.energy < 5) return "About to collapse from exhaustion. Need to sleep soon."
     return "Running low on energy. Slowing down to conserve what I have."
+  }
+
+  // Low durability equipment — need replacement
+  if (eq.weapon?.durability !== undefined) {
+    const wpnPct = eq.weapon.durability / eq.weapon.maxDurability
+    if (wpnPct < 0.30) {
+      const label = EQUIPMENT_DEFS[eq.weapon.id]?.label || 'Weapon'
+      return `${label} is wearing out (${eq.weapon.durability}/${eq.weapon.maxDurability}). Need to craft a replacement soon.`
+    }
+  }
+  if (eq.armor?.durability !== undefined) {
+    const armPct = eq.armor.durability / eq.armor.maxDurability
+    if (armPct < 0.30) {
+      const label = EQUIPMENT_DEFS[eq.armor.id]?.label || 'Armor'
+      return `${label} is wearing out (${eq.armor.durability}/${eq.armor.maxDurability}). Need to craft a replacement soon.`
+    }
   }
 
   // Idle/wandering — check if anything is craftable FIRST
@@ -478,11 +528,40 @@ function HelpModal({ onClose }) {
         <div style={SECTION}>
           <div style={SECTION_TITLE}>Crafting</div>
           <div style={HELP_TEXT}>
-            When idle with materials, creatures auto-craft equipment and potions:<br /><br />
-            <span style={{ color: '#ffcc44' }}>Stone Blade</span> <span style={HELP_DIM}>—</span> 2 stone + 1 wood = +8 ATK<br />
-            <span style={{ color: '#44aaff' }}>Wooden Shield</span> <span style={HELP_DIM}>—</span> 2 wood = +15 max HP<br />
-            <span style={{ color: '#44ff88' }}>Healing Potion</span> <span style={HELP_DIM}>—</span> 2 herbs = instant +40 HP heal<br /><br />
-            Crafted items go into inventory first, then auto-equip after 2 seconds. Equipment moves to dedicated slots, freeing inventory space.
+            When idle with materials, creatures auto-craft equipment and potions. Crafting takes time:<br /><br />
+            <span style={{ color: '#ffcc44' }}>Stone Blade</span> <span style={HELP_DIM}>—</span> 2 stone + 1 wood = +8 ATK (15–20s, 15 energy)<br />
+            <span style={{ color: '#44aaff' }}>Wooden Shield</span> <span style={HELP_DIM}>—</span> 2 wood = +15 max HP (20–25s, 20 energy)<br />
+            <span style={{ color: '#44ff88' }}>Healing Potion</span> <span style={HELP_DIM}>—</span> 2 herbs = +40 HP heal (10–12s, 8 energy)<br /><br />
+            A gold progress bar shows crafting progress. Creatures are vulnerable while crafting — if attacked, crafting is interrupted and materials are returned. Crafted items auto-equip after 2 seconds.
+          </div>
+        </div>
+
+        {/* Combat */}
+        <div style={SECTION}>
+          <div style={SECTION_TITLE}>Combat</div>
+          <div style={HELP_TEXT}>
+            When two creatures get within 12 units, there's a chance a fight starts based on personality and aggression stats.<br /><br />
+            <span style={HELP_KEY}>Engagement</span> <span style={HELP_DIM}>—</span> Fierce/bold attack on sight, timid/gentle try to flee, sneaky only attacks weaker targets, curious evaluates first<br />
+            <span style={HELP_KEY}>Damage</span> <span style={HELP_DIM}>—</span> ATK x random(0.7-1.3), equipment bonuses included. Armor reduces incoming damage<br />
+            <span style={HELP_KEY}>Type matchups</span> <span style={HELP_DIM}>—</span> 1.5x damage bonus:<br />
+            &nbsp;&nbsp;<span style={{ color: '#ff6600' }}>Fire</span> {'>'} <span style={{ color: '#44ff66' }}>Grass</span> {'>'} <span style={{ color: '#44aaff' }}>Water</span> {'>'} <span style={{ color: '#ff6600' }}>Fire</span><br />
+            &nbsp;&nbsp;<span style={{ color: '#ffee44' }}>Electric</span> {'>'} <span style={{ color: '#44aaff' }}>Water</span>, <span style={{ color: '#bb66ff' }}>Dark</span> {'>'} <span style={{ color: '#ffee44' }}>Electric</span>, <span style={{ color: '#88eeff' }}>Ice</span> {'>'} <span style={{ color: '#ff6600' }}>Fire</span><br /><br />
+            <span style={HELP_KEY}>Fleeing</span> <span style={HELP_DIM}>—</span> Creatures can flee mid-combat. 60% chance if faster, 20% if slower<br />
+            <span style={HELP_KEY}>Death</span> <span style={HELP_DIM}>—</span> HP 0 = permanent death. Orb shatters into particles. Winner gets XP and loots 1-2 items<br />
+            <span style={HELP_KEY}>Cooldown</span> <span style={HELP_DIM}>—</span> 60 seconds after combat before fighting again<br />
+            <span style={HELP_KEY}>Interrupts</span> <span style={HELP_DIM}>—</span> Sleeping, eating, or gathering creatures can be ambushed
+          </div>
+        </div>
+
+        {/* Leveling */}
+        <div style={SECTION}>
+          <div style={SECTION_TITLE}>Leveling</div>
+          <div style={HELP_TEXT}>
+            <span style={HELP_KEY}>XP threshold</span> <span style={HELP_DIM}>—</span> Level x 30 XP to level up (Lv.1 = 30 XP, Lv.5 = 150 XP)<br />
+            <span style={HELP_KEY}>XP sources</span> <span style={HELP_DIM}>—</span> Defeating a creature grants (opponent level x 25) XP<br />
+            <span style={HELP_KEY}>Stat gains</span> <span style={HELP_DIM}>—</span> +10 max HP, +2 ATK, +1 SPD per level<br />
+            <span style={HELP_KEY}>Max level</span> <span style={HELP_DIM}>—</span> 10<br />
+            <span style={HELP_KEY}>Visuals</span> <span style={HELP_DIM}>—</span> Bright glow burst + floating "LEVEL UP!" text
           </div>
         </div>
 
@@ -499,12 +578,14 @@ function HelpModal({ onClose }) {
         <div style={SECTION}>
           <div style={SECTION_TITLE}>Status</div>
           <div style={HELP_TEXT}>
+            <span style={{ color: '#ff4444' }}>FIGHTING</span> <span style={HELP_DIM}>—</span> In combat with another creature<br />
             <span style={{ color: '#666' }}>IDLE</span> <span style={HELP_DIM}>—</span> Resting between wander targets<br />
             <span style={{ color: '#88aa88' }}>WANDERING</span> <span style={HELP_DIM}>—</span> Moving to a random point<br />
             <span style={{ color: '#ffcc44' }}>SEEKING FOOD</span> <span style={HELP_DIM}>—</span> Hungry, heading toward food<br />
             <span style={{ color: '#44ff88' }}>EATING</span> <span style={HELP_DIM}>—</span> Consuming food (3 seconds)<br />
             <span style={{ color: '#888866' }}>SEEKING RESOURCE</span> <span style={HELP_DIM}>—</span> Heading to harvest<br />
             <span style={{ color: '#aa7744' }}>GATHERING</span> <span style={HELP_DIM}>—</span> Harvesting (3–5 seconds)<br />
+            <span style={{ color: '#ffcc44' }}>CRAFTING</span> <span style={HELP_DIM}>—</span> Crafting an item (10–25 seconds, vulnerable)<br />
             <span style={{ color: '#6688cc' }}>SLEEPING</span> <span style={HELP_DIM}>—</span> Resting (vulnerable)<br />
             <span style={{ color: '#44aaff' }}>TIRED</span> <span style={HELP_DIM}>—</span> Low energy, slower<br />
             <span style={{ color: '#ffaa44' }}>HUNGRY</span> <span style={HELP_DIM}>—</span> Low hunger, no food targeted
@@ -534,7 +615,8 @@ export default function CreatureUI({
   onSelect, onFollow,
   activityLog, worldClock, onReset,
 }) {
-  const selected = creatures.find(c => c.id === selectedId)
+  const sel = creatures.find(c => c.id === selectedId)
+  const selected = sel && sel.alive ? sel : null
   const thinkingText = selected ? generateThinkingText(selected) : null
   const [showHelp, setShowHelp] = useState(false)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
@@ -596,47 +678,60 @@ export default function CreatureUI({
           {creatures.map(c => {
             const spec = SPECIES[c.species]
             const hpPct = c.maxHp > 0 ? (c.hp / c.maxHp) * 100 : 0
+            const isDead = !c.alive
             return (
               <div
                 key={c.id}
-                onClick={() => onSelect(c.id)}
+                onClick={isDead ? undefined : () => onSelect(c.id)}
                 style={{
                   padding: '7px 10px', marginBottom: '4px', borderRadius: '4px',
-                  cursor: 'pointer',
-                  background: selectedId === c.id ? 'rgba(80, 200, 120, 0.15)' : 'transparent',
-                  borderLeft: `3px solid ${spec?.color || '#888'}`,
-                  opacity: c.alive ? 1 : 0.4,
+                  cursor: isDead ? 'default' : 'pointer',
+                  background: !isDead && selectedId === c.id ? 'rgba(80, 200, 120, 0.15)' : 'transparent',
+                  borderLeft: `3px solid ${isDead ? '#333' : (spec?.color || '#888')}`,
+                  opacity: isDead ? 0.35 : 1,
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ color: spec?.glow || '#aaa', fontSize: '13px', fontWeight: 'bold', fontFamily: FONT_HEADER }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{
+                    color: isDead ? '#555' : (spec?.glow || '#aaa'),
+                    fontSize: '13px', fontWeight: 'bold', fontFamily: FONT_HEADER,
+                    textDecoration: isDead ? 'line-through' : 'none',
+                  }}>
                     {c.name}
                   </span>
-                  <span style={{ color: '#556655', fontSize: '10px', fontFamily: FONT_DATA }}>
+                  <span style={{
+                    flex: 1, fontSize: '9px', fontFamily: FONT_DATA,
+                    fontWeight: isDead ? 'bold' : 'normal',
+                    textAlign: 'right',
+                    color: isDead ? '#ff4444'
+                      : c.state === 'fighting' ? '#ff4444'
+                      : c.state === 'chasing' ? '#ff6644'
+                      : c.state === 'fleeing' ? '#ff8844'
+                      : c.state === 'scared' ? '#ff8844'
+                      : c.state === 'drinking potion' ? '#44ff88'
+                      : c.state === 'sleeping' ? '#6688cc'
+                      : c.state === 'gathering' ? '#aa7744'
+                      : c.state === 'crafting' ? '#ffcc44'
+                      : c.state === 'seeking resource' ? '#888866'
+                      : '#667766',
+                  }}>
+                    {isDead ? 'DEAD' : c.state}
+                  </span>
+                  <span style={{ color: isDead ? '#444' : '#556655', fontSize: '10px', fontFamily: FONT_DATA }}>
                     Lv.{c.level}
                   </span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-                  <div style={{
-                    flex: 1, height: '5px',
-                    background: 'rgba(0,0,0,0.5)', borderRadius: '3px', overflow: 'hidden',
-                  }}>
+                <div style={{
+                  height: '5px', marginTop: '4px',
+                  background: 'rgba(0,0,0,0.5)', borderRadius: '3px', overflow: 'hidden',
+                }}>
+                  {!isDead && (
                     <div style={{
                       width: `${hpPct}%`, height: '100%',
                       background: hpPct > 50 ? '#44ff44' : hpPct > 25 ? '#ffaa00' : '#ff4444',
                       borderRadius: '3px', transition: 'width 0.3s ease',
                     }} />
-                  </div>
-                  <span style={{
-                    fontSize: '9px', fontFamily: FONT_DATA,
-                    color: c.alive && c.state === 'sleeping' ? '#6688cc'
-                      : c.alive && c.state === 'gathering' ? '#aa7744'
-                      : c.alive && c.state === 'seeking resource' ? '#888866'
-                      : '#667766',
-                    minWidth: '50px', textAlign: 'right',
-                  }}>
-                    {c.alive ? c.state : 'dead'}
-                  </span>
+                  )}
                 </div>
               </div>
             )
@@ -788,11 +883,11 @@ export default function CreatureUI({
               }}>
                 <StatRow label="ATK" value={
                   selected.equipment?.weapon
-                    ? <>{selected.atk} <span style={{ color: '#ff6644', fontSize: '10px' }}>(+{selected.equipment.weapon.atkBonus})</span></>
-                    : selected.atk
+                    ? <>{Math.round(selected.atk)} <span style={{ color: '#ff6644', fontSize: '10px' }}>(+{selected.equipment.weapon.atkBonus})</span></>
+                    : Math.round(selected.atk)
                 } />
-                <StatRow label="SPD" value={selected.spd} />
-                <StatRow label="XP" value={selected.xp} />
+                <StatRow label="SPD" value={Math.round(selected.spd)} />
+                <StatRow label="XP" value={`${selected.xp}/${selected.level * 30}`} />
                 <StatRow label="Kills" value={selected.kills} />
                 <StatRow label="Personality" value={selected.personality} />
                 <StatRow
@@ -820,23 +915,51 @@ export default function CreatureUI({
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     {/* Weapon slot */}
-                    {selected.equipment?.weapon ? (
-                      <div style={{
-                        padding: '4px 6px', borderRadius: '4px',
-                        background: 'rgba(255, 100, 68, 0.06)',
-                        border: '1px solid rgba(255, 100, 68, 0.2)',
-                        borderLeft: '3px solid rgba(255, 100, 68, 0.5)',
-                        display: 'flex', alignItems: 'center', gap: '6px',
-                      }}>
-                        <span style={{ fontSize: '11px' }}>&#9876;&#65039;</span>
-                        <span style={{ color: '#ffcc44', fontSize: '11px', fontFamily: FONT_DATA }}>
-                          {EQUIPMENT_DEFS[selected.equipment.weapon.id]?.label || 'Weapon'}
-                        </span>
-                        <span style={{ fontSize: '10px', color: '#ff6644', fontFamily: FONT_DATA }}>
-                          +{selected.equipment.weapon.atkBonus}
-                        </span>
-                      </div>
-                    ) : (
+                    {selected.equipment?.weapon ? (() => {
+                      const wpn = selected.equipment.weapon
+                      const hasDur = wpn.durability !== undefined
+                      const durPct = hasDur ? wpn.durability / wpn.maxDurability : 1
+                      const durColor = durPct > 0.5 ? '#44ff44' : durPct > 0.25 ? '#ffcc44' : '#ff4444'
+                      return (
+                        <div style={{
+                          padding: '4px 6px', borderRadius: '4px',
+                          background: 'rgba(255, 100, 68, 0.06)',
+                          border: '1px solid rgba(255, 100, 68, 0.2)',
+                          borderLeft: '3px solid rgba(255, 100, 68, 0.5)',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '11px' }}>&#9876;&#65039;</span>
+                            <span style={{ color: '#ffcc44', fontSize: '11px', fontFamily: FONT_DATA }}>
+                              {EQUIPMENT_DEFS[wpn.id]?.label || 'Weapon'}
+                            </span>
+                            <span style={{ fontSize: '10px', color: '#ff6644', fontFamily: FONT_DATA }}>
+                              +{wpn.atkBonus}
+                            </span>
+                            {hasDur && (
+                              <span style={{ fontSize: '9px', color: '#667766', fontFamily: FONT_DATA, marginLeft: 'auto' }}>
+                                {wpn.durability}/{wpn.maxDurability}
+                              </span>
+                            )}
+                          </div>
+                          {hasDur && (
+                            <div style={{
+                              width: '100%', height: '3px',
+                              background: 'rgba(0,0,0,0.5)',
+                              borderRadius: '2px', overflow: 'hidden',
+                              marginTop: '3px',
+                            }}>
+                              <div style={{
+                                width: `${durPct * 100}%`,
+                                height: '100%',
+                                background: durColor,
+                                borderRadius: '2px',
+                                transition: 'width 0.3s ease',
+                              }} />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })() : (
                       <div style={{
                         padding: '4px 6px', borderRadius: '4px',
                         border: '1px dashed rgba(80, 200, 120, 0.15)',
@@ -847,23 +970,51 @@ export default function CreatureUI({
                       </div>
                     )}
                     {/* Armor slot */}
-                    {selected.equipment?.armor ? (
-                      <div style={{
-                        padding: '4px 6px', borderRadius: '4px',
-                        background: 'rgba(68, 170, 255, 0.06)',
-                        border: '1px solid rgba(68, 170, 255, 0.2)',
-                        borderLeft: '3px solid rgba(68, 170, 255, 0.5)',
-                        display: 'flex', alignItems: 'center', gap: '6px',
-                      }}>
-                        <span style={{ fontSize: '11px' }}>&#128737;&#65039;</span>
-                        <span style={{ color: '#44aaff', fontSize: '11px', fontFamily: FONT_DATA }}>
-                          {EQUIPMENT_DEFS[selected.equipment.armor.id]?.label || 'Armor'}
-                        </span>
-                        <span style={{ fontSize: '10px', color: '#44aaff', fontFamily: FONT_DATA }}>
-                          +{selected.equipment.armor.maxHpBonus}
-                        </span>
-                      </div>
-                    ) : (
+                    {selected.equipment?.armor ? (() => {
+                      const arm = selected.equipment.armor
+                      const hasDur = arm.durability !== undefined
+                      const durPct = hasDur ? arm.durability / arm.maxDurability : 1
+                      const durColor = durPct > 0.5 ? '#44ff44' : durPct > 0.25 ? '#ffcc44' : '#ff4444'
+                      return (
+                        <div style={{
+                          padding: '4px 6px', borderRadius: '4px',
+                          background: 'rgba(68, 170, 255, 0.06)',
+                          border: '1px solid rgba(68, 170, 255, 0.2)',
+                          borderLeft: '3px solid rgba(68, 170, 255, 0.5)',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '11px' }}>&#128737;&#65039;</span>
+                            <span style={{ color: '#44aaff', fontSize: '11px', fontFamily: FONT_DATA }}>
+                              {EQUIPMENT_DEFS[arm.id]?.label || 'Armor'}
+                            </span>
+                            <span style={{ fontSize: '10px', color: '#44aaff', fontFamily: FONT_DATA }}>
+                              +{arm.maxHpBonus}
+                            </span>
+                            {hasDur && (
+                              <span style={{ fontSize: '9px', color: '#667766', fontFamily: FONT_DATA, marginLeft: 'auto' }}>
+                                {arm.durability}/{arm.maxDurability}
+                              </span>
+                            )}
+                          </div>
+                          {hasDur && (
+                            <div style={{
+                              width: '100%', height: '3px',
+                              background: 'rgba(0,0,0,0.5)',
+                              borderRadius: '2px', overflow: 'hidden',
+                              marginTop: '3px',
+                            }}>
+                              <div style={{
+                                width: `${durPct * 100}%`,
+                                height: '100%',
+                                background: durColor,
+                                borderRadius: '2px',
+                                transition: 'width 0.3s ease',
+                              }} />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })() : (
                       <div style={{
                         padding: '4px 6px', borderRadius: '4px',
                         border: '1px dashed rgba(80, 200, 120, 0.15)',

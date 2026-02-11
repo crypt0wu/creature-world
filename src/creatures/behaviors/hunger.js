@@ -75,6 +75,11 @@ export function updateHunger(c, spec, dt, foods, allCreatures) {
   if (!c.alive) return
   if (c.sleeping) return
   if (c.gathering) return
+  if (c.crafting) {
+    // Still drain hunger while crafting, but don't seek food
+    c.hunger = Math.max(0, c.hunger - dt * spec.hungerDrain)
+    return
+  }
 
   // Drain hunger
   c.hunger = Math.max(0, c.hunger - dt * spec.hungerDrain)
@@ -123,6 +128,19 @@ export function updateHunger(c, spec, dt, foods, allCreatures) {
   if (c.hunger >= threshold + 10 && c.seekingFood) {
     c.seekingFood = false
     c.targetFoodIdx = -1
+  }
+
+  // Scared state: only allow eating from inventory when literally starving, no food-seeking
+  if (c._scaredTimer > 0) {
+    if (c.hunger < 10 && c.inventory.length > 0) {
+      eatFromInventory(c)
+    }
+    // Cancel any active food-seeking
+    if (c.seekingFood) {
+      c.seekingFood = false
+      c.targetFoodIdx = -1
+    }
+    return
   }
 
   // Eat from inventory before seeking food on the map

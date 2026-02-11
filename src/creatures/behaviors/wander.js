@@ -55,7 +55,62 @@ export function updateMovement(c, spec, dt) {
     return
   }
 
-  const baseSpeed = c.spd * 0.4
+  // Crafting — stop all movement
+  if (c.crafting) {
+    c.currentSpeed = Math.max(0, c.currentSpeed - 3.0 * dt)
+    return
+  }
+
+  // Drinking potion — stop all movement
+  if (c.drinkingPotion) {
+    c.currentSpeed = Math.max(0, c.currentSpeed - 3.0 * dt)
+    return
+  }
+
+  const fleeBoost = c._fleeSprint > 0 ? 2.0 : 1.0
+  const scaredBoost = (c._scaredTimer > 0 && c._fleeSprint <= 0) ? 1.3 : 1.0
+  const baseSpeed = c.spd * 0.4 * fleeBoost * scaredBoost
+
+  // Scared state: enforce minimum flee distance + keep running
+  if (c._scaredTimer > 0 && !c.inCombat) {
+    const fdx = c.x - (c._fleeFromX || 0)
+    const fdz = c.z - (c._fleeFromZ || 0)
+    const fleeDist = Math.sqrt(fdx * fdx + fdz * fdz)
+    const minDist = c._fleeMinDist || 30
+    const farEnough = fleeDist >= minDist
+
+    if (c._fleeSprint > 0 || !farEnough) {
+      // Not safe yet — keep sprint alive if needed
+      if (!farEnough && c._fleeSprint <= 0) c._fleeSprint = 2.0
+
+      if (!c.moving) {
+        const awayDist = Math.sqrt(fdx * fdx + fdz * fdz) || 1
+        c.targetX = c.x + (fdx / awayDist) * 25
+        c.targetZ = c.z + (fdz / awayDist) * 25
+
+        // Boundary redirect: slide along edge instead of stopping
+        const margin = 10
+        if (c.targetX > WORLD_HALF - margin) {
+          c.targetX = WORLD_HALF - margin - Math.random() * 10
+          c.targetZ += (Math.random() > 0.5 ? 1 : -1) * 20
+        } else if (c.targetX < -WORLD_HALF + margin) {
+          c.targetX = -WORLD_HALF + margin + Math.random() * 10
+          c.targetZ += (Math.random() > 0.5 ? 1 : -1) * 20
+        }
+        if (c.targetZ > WORLD_HALF - margin) {
+          c.targetZ = WORLD_HALF - margin - Math.random() * 10
+          c.targetX += (Math.random() > 0.5 ? 1 : -1) * 20
+        } else if (c.targetZ < -WORLD_HALF + margin) {
+          c.targetZ = -WORLD_HALF + margin + Math.random() * 10
+          c.targetX += (Math.random() > 0.5 ? 1 : -1) * 20
+        }
+        c.targetX = Math.max(-WORLD_HALF, Math.min(WORLD_HALF, c.targetX))
+        c.targetZ = Math.max(-WORLD_HALF, Math.min(WORLD_HALF, c.targetZ))
+        c.moving = true
+        c.pause = 0
+      }
+    }
+  }
 
   if (!c.moving) {
     // If seeking food, hunger.js will set moving+target — just decel and wait
@@ -165,7 +220,13 @@ export function updateMovement(c, spec, dt) {
     c.x += Math.sin(c.rotY) * c.currentSpeed * dt
     c.z += Math.cos(c.rotY) * c.currentSpeed * dt
 
-    if (dist < 1.5 && c.currentSpeed < 0.3 && !c.seekingFood && !c.seekingResource) {
+    // Don't stop if still fleeing and not far enough from danger
+    const stillFleeing = c._scaredTimer > 0 && (c._fleeMinDist || 0) > 0
+    const fleeDistOk = !stillFleeing || (() => {
+      const fx = c.x - (c._fleeFromX || 0), fz = c.z - (c._fleeFromZ || 0)
+      return Math.sqrt(fx * fx + fz * fz) >= c._fleeMinDist
+    })()
+    if (dist < 1.5 && c.currentSpeed < 0.3 && !c.seekingFood && !c.seekingResource && fleeDistOk) {
       c.moving = false
       c.pause = spec.pauseMin + Math.random() * (spec.pauseMax - spec.pauseMin)
     }

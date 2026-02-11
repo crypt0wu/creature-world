@@ -56,11 +56,22 @@ export function scoreItem(itemType, c, speciesMemory) {
   }
 
   // 4. Equipment check: deprioritize materials for equipment we have
+  //    BUT re-prioritize if durability is low (need replacement)
   if (c.equipment?.weapon && WEAPON_MATS.includes(itemType)) {
-    score *= 0.5
+    const wpn = c.equipment.weapon
+    if (wpn.durability !== undefined && wpn.durability / wpn.maxDurability < 0.30) {
+      score *= 1.3
+    } else {
+      score *= 0.5
+    }
   }
   if (c.equipment?.armor && DEFENSE_MATS.includes(itemType)) {
-    score *= 0.5
+    const arm = c.equipment.armor
+    if (arm.durability !== undefined && arm.durability / arm.maxDurability < 0.30) {
+      score *= 1.3
+    } else {
+      score *= 0.5
+    }
   }
 
   // 5. Age/kills modifier

@@ -1,14 +1,32 @@
-// Leveling system — XP thresholds and stat gains
+// Leveling system — XP thresholds, stat gains, max level 10
+
+const MAX_LEVEL = 10
 
 export function checkLevelUp(c, spec) {
-  const xpNeeded = c.level * 100
+  if (!c.alive) return false
+  if (c.level >= MAX_LEVEL) return false
+
+  const xpNeeded = c.level * 30
 
   if (c.xp >= xpNeeded) {
     c.level++
     c.xp -= xpNeeded
-    c.maxHp += Math.floor(spec.baseHp * 0.1)
-    c.hp = Math.min(c.hp + 10, c.maxHp)
-    c.atk += Math.floor(spec.baseAtk * 0.05) + 1
+
+    // Stat gains: +10 max HP, +2 ATK, +1 SPD
+    c.maxHp += 10
+    c.hp = Math.min(c.maxHp, c.hp + 10) // heal 10 on level up
+    c.atk += 2
+    c.spd += 1
+    c.baseSpd += 1
+
+    // Set visual flag for level-up effect
+    c.justLeveledUp = {
+      newLevel: c.level,
+      hpGain: 10,
+      atkGain: 2,
+      spdGain: 1,
+    }
+
     return true
   }
   return false

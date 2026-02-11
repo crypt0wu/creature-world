@@ -17,7 +17,8 @@ const ARRIVE_DIST = 3.5
 const MATERIAL_TO_RESOURCE = { wood: 'tree', stone: 'rock', herb: 'bush' }
 
 export function updateGathering(c, spec, dt, resourceStates, allCreatures, speciesMemory) {
-  if (!c.alive || c.sleeping || c.eating || c.seekingFood) return
+  if (!c.alive || c.sleeping || c.eating || c.seekingFood || c.crafting) return
+  if (c._scaredTimer > 0) return  // Scared creatures don't gather — run first
 
   // ── Active gathering ──────────────────────────────────────
   if (c.gathering) {

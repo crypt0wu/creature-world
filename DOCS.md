@@ -42,8 +42,8 @@ src/
 │   │   ├── gathering.js     # Resource gathering — wood, stone, herbs, crystals
 │   │   ├── crafting.js      # Auto-craft behavior, auto-equip, auto-use potions
 │   │   ├── energy.js        # Energy drain, tiredness, sleep/wake cycle
-│   │   ├── combat.js        # Stub — proximity, aggression, damage, XP
-│   │   └── leveling.js      # XP thresholds, stat gains on level-up
+│   │   ├── combat.js        # Full combat — engagement, damage, type matchups, death, rewards
+│   │   └── leveling.js      # XP thresholds, stat gains, max level 10, level-up effects
 │   └── species/
 │       ├── index.js         # Species registry
 │       ├── embrix.js        # Fire — fast, aggressive
@@ -118,8 +118,9 @@ Six species, one creature each at world start. All render as glowing orbs with s
 
 Update pipeline runs every frame in `CreatureManager.useFrame()`:
 ```
-updateEnergy → updateHunger → updateGathering → updateCrafting → updateMovement → updateCombat → checkLevelUp → state determination
+updateEnergy → [if not in combat: updateHunger → updateGathering → updateCrafting → updateMovement] → updateCombat → checkLevelUp → state determination
 ```
+When a creature is in active combat, hunger/gathering/crafting/movement behaviors are skipped — combat handles its own movement (chase/face target).
 
 ### Wander (implemented)
 - **Idle:** Waits `pauseMin`–`pauseMax` seconds, then picks random target within `range`
@@ -177,16 +178,63 @@ updateEnergy → updateHunger → updateGathering → updateCrafting → updateM
 - **Visuals:** Orb dims (emissive 0.2 + slow pulse), slow breathing scale, floating "zZz" text, "Awake!" on wake
 - **Sleeping creatures are vulnerable** — cannot move, eat, or seek food
 
-### Combat (stub)
-- File exists with proximity detection, aggression checks, cooldown, damage, XP rewards
-- Currently a no-op (TODO)
+### Combat (implemented)
+Full creature-vs-creature combat system with AI-driven engagement, turn-based damage exchange, and permanent death.
+
+**Engagement:**
+- Detection radius: 12 units
+- Personality determines aggression: fierce/bold attack on sight, timid/gentle try to flee, sneaky only attacks weaker targets, curious evaluates first
+- Creatures evaluate before fighting: HP, weapon, target strength, level comparison
+- Creatures do NOT fight while sleeping, eating, or crafting
+- Sleeping/crafting/gathering creatures can be interrupted and forced into combat
+
+**Damage Mechanics:**
+- Damage = ATK × random(0.7–1.3). Equipment bonuses included in ATK stat
+- Type matchups (1.5× damage bonus): fire > grass > water > fire, electric > water, dark > electric, ice > fire
+- Armor reduces incoming damage (30% of armor maxHpBonus as flat reduction)
+- Hit interval: 1–2 seconds per strike
+- Combat radius: 3.5 units (creatures chase if further, disengage if > 18 units)
+
+**Fleeing:**
+- Creatures can attempt to flee mid-combat every 3 seconds
+- Speed determines escape: faster = 60% chance, slower/equal = 20% chance
+- Timid flees at HP < 70%, gentle < 60%, sneaky < 40%, curious < 50%, anyone < 30%
+
+**Death:**
+- HP 0 = permanent death. Creature removed from world and roster
+- Death animation: orb shrinks while particles shatter outward, fades over 2 seconds
+- Death cause recorded in species memory for generational learning
+- Log: "X defeated Y! (+25 XP)" and "Y has been slain by X!"
+
+**Rewards:**
+- Winner gets XP = opponent level × 25
+- Kill count increases
+- Winner loots 1–2 random items from dead creature's inventory
+- 60-second cooldown before fighting again
+
+**Visual Effects:**
+- Both orbs pulse rapidly during combat (15 Hz)
+- Combat shake: rapid jitter on X/Z axes
+- Red damage particles fly from attacker toward target on each hit
+- Yellow particles + "SUPER EFFECTIVE!" text on type advantage hits
+- Floating damage numbers ("-12", "-8") pop up on hit
+- HP bars drain visibly
+- Bright flash on each hit dealt/taken
+- Death: orb shatters into species-colored particles, shrinks and fades
+
+**New creature fields:** `inCombat`, `_combatTarget`, `_combatCooldown`, `_hitTimer`, `_fleeTimer`, `combatHitDealt`, `combatHitTaken`, `combatKill`, `combatDeath`, `combatEngaged`, `combatFled`, `combatInterrupted`, `deathCause`, `killedBy`
 
 ### Leveling (implemented)
-- XP threshold: `level * 100`
-- On level-up: `maxHp += floor(baseHp * 0.1)`, `hp += 10`, `atk += floor(baseAtk * 0.05) + 1`
+- XP threshold: `level * 30` to level up (Lv.1 needs 30 XP, Lv.5 needs 150 XP)
+- XP sources: defeating creatures (opponent level × 25 XP)
+- On level-up: +10 max HP, +2 ATK, +1 SPD (also increases baseSpd)
+- Max level: 10
+- Level-up animation: bright glow burst (2s), floating "LEVEL UP! Lv.N" text, yellow particle burst
+- Log: "X reached Level N! (+10 HP, +2 ATK, +1 SPD)"
+- **New creature field:** `justLeveledUp`
 
 ### State Determination
-Priority order: sleeping > eating > gathering > seeking food > seeking resource > hungry (hunger < 25) > tired (energy < 25) > wandering > idle
+Priority order: fighting > sleeping > eating > gathering > seeking food > seeking resource > hungry (hunger < 25) > tired (energy < 25) > wandering > idle
 
 ---
 

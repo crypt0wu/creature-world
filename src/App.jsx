@@ -12,7 +12,9 @@ import Starfield from './components/Starfield'
 import Wildlife from './components/Wildlife'
 import CreatureManager from './creatures/CreatureManager'
 import CreatureUI from './components/CreatureUI'
+import DebugPanel from './components/DebugPanel'
 import { clearAll } from './creatures/creatureStore'
+import { regenerateWorld } from './worldData'
 import { hoverState, clearHover } from './hoverStore'
 import './index.css'
 
@@ -23,7 +25,7 @@ function clampTarget(target) {
   target.z = Math.max(-CAM_BOUNDS, Math.min(CAM_BOUNDS, target.z))
 }
 
-function Scene({ selectedId, followingId, onSelect, onSync, resetKey, resourceStatesRef }) {
+function Scene({ selectedId, followingId, onSelect, onSync, resetKey, resourceStatesRef, speedRef, debugRef, debugOpen, showAllThinking }) {
   const controlsRef = useRef()
   const idleTimer = useRef(null)
   const { camera } = useThree()
@@ -221,9 +223,9 @@ function Scene({ selectedId, followingId, onSelect, onSync, resetKey, resourceSt
       <DayNightCycle speed={0.015} />
       <Terrain onClick={handleTerrainClick} />
       <Water />
-      <Trees resourceStatesRef={resourceStatesRef} />
+      <Trees key={`trees-${resetKey}`} resourceStatesRef={resourceStatesRef} />
       <Fireflies count={300} />
-      <Wildlife />
+      <Wildlife key={`wildlife-${resetKey}`} />
       <CreatureManager
         key={resetKey}
         controlsRef={controlsRef}
@@ -232,6 +234,10 @@ function Scene({ selectedId, followingId, onSelect, onSync, resetKey, resourceSt
         onSelect={onSelect}
         onSync={onSync}
         resourceStatesRef={resourceStatesRef}
+        speedRef={speedRef}
+        debugRef={debugRef}
+        debugOpen={debugOpen}
+        showAllThinking={showAllThinking}
       />
     </>
   )
@@ -302,7 +308,17 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null)
   const [followingId, setFollowingId] = useState(null)
   const [resetKey, setResetKey] = useState(0)
+  const [debugOpen, setDebugOpen] = useState(false)
+  const [showAllThinking, setShowAllThinking] = useState(false)
   const resourceStatesRef = useRef([])
+  const speedRef = useRef(1)
+  const debugRef = useRef(null)
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === '`') setDebugOpen(d => !d) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const handleSync = useCallback((creatures, worldClock, log) => {
     setDisplayData({ creatures, worldClock, log })
@@ -310,6 +326,7 @@ export default function App() {
 
   const handleReset = useCallback(() => {
     clearAll()
+    regenerateWorld()
     setSelectedId(null)
     setFollowingId(null)
     setDisplayData({ creatures: [], worldClock: 0, log: [] })
@@ -341,6 +358,10 @@ export default function App() {
           onSync={handleSync}
           resetKey={resetKey}
           resourceStatesRef={resourceStatesRef}
+          speedRef={speedRef}
+          debugRef={debugRef}
+          debugOpen={debugOpen}
+          showAllThinking={showAllThinking}
         />
       </Canvas>
 
@@ -356,6 +377,18 @@ export default function App() {
         worldClock={displayData.worldClock}
         onReset={handleReset}
       />
+
+      {debugOpen && (
+        <DebugPanel
+          debugRef={debugRef}
+          speedRef={speedRef}
+          creatures={displayData.creatures}
+          selectedId={selectedId}
+          onSelect={handleSelect}
+          showAllThinking={showAllThinking}
+          onToggleThinking={setShowAllThinking}
+        />
+      )}
 
       <div style={{
         position: 'fixed',

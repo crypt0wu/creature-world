@@ -1,3 +1,5 @@
+import { interruptCraft } from '../crafting'
+
 export function updateEnergy(c, spec, dt) {
   if (!c.alive) return
 
@@ -37,6 +39,9 @@ export function updateEnergy(c, spec, dt) {
   else if (c.personality === 'fierce') sleepThreshold = 3
 
   if (c.energy < sleepThreshold) {
+    // Cancel crafting before sleeping — return materials
+    if (c.crafting) interruptCraft(c)
+
     c.sleeping = true
     c.moving = false
     c.seekingFood = false
