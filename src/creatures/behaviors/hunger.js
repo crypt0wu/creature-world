@@ -74,6 +74,7 @@ export function updateFoodSources(foods, dt) {
 export function updateHunger(c, spec, dt, foods, allCreatures) {
   if (!c.alive) return
   if (c.sleeping) return
+  if (c.gathering) return
 
   // Drain hunger
   c.hunger = Math.max(0, c.hunger - dt * spec.hungerDrain)
@@ -103,7 +104,7 @@ export function updateHunger(c, spec, dt, foods, allCreatures) {
         const food = foods[c.targetFoodIdx]
         food.beingEaten = false
         food.popTimer = 0.6
-        food.respawnTimer = 30 + Math.random() * 30
+        food.respawnTimer = 120 + Math.random() * 60
       }
 
       c.eating = false

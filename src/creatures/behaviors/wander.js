@@ -49,11 +49,23 @@ export function updateMovement(c, spec, dt) {
     return
   }
 
+  // Gathering — stop all movement
+  if (c.gathering) {
+    c.currentSpeed = Math.max(0, c.currentSpeed - 3.0 * dt)
+    return
+  }
+
   const baseSpeed = c.spd * 0.4
 
   if (!c.moving) {
     // If seeking food, hunger.js will set moving+target — just decel and wait
     if (c.seekingFood) {
+      c.currentSpeed = Math.max(0, c.currentSpeed - 2.0 * dt)
+      return
+    }
+
+    // If seeking resource, gathering.js drives movement — just decel and wait
+    if (c.seekingResource) {
       c.currentSpeed = Math.max(0, c.currentSpeed - 2.0 * dt)
       return
     }
@@ -83,7 +95,7 @@ export function updateMovement(c, spec, dt) {
     }
     c.lastDist = dist
 
-    if (c.stuckTimer > 2.5 && !c.seekingFood) {
+    if (c.stuckTimer > 2.5 && !c.seekingFood && !c.seekingResource) {
       pickTarget(c, spec.range)
     }
 
@@ -151,7 +163,7 @@ export function updateMovement(c, spec, dt) {
     c.x += Math.sin(c.rotY) * c.currentSpeed * dt
     c.z += Math.cos(c.rotY) * c.currentSpeed * dt
 
-    if (dist < 1.5 && c.currentSpeed < 0.3 && !c.seekingFood) {
+    if (dist < 1.5 && c.currentSpeed < 0.3 && !c.seekingFood && !c.seekingResource) {
       c.moving = false
       c.pause = spec.pauseMin + Math.random() * (spec.pauseMax - spec.pauseMin)
     }

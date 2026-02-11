@@ -64,8 +64,22 @@ export function createCreature(speciesName, index) {
     sleepDuration: 0,
     vulnerable: false,
     inventory: [],
+    equipment: { weapon: null, armor: null },
+    strategyMemory: [],
+    justCrafted: null,
+    justDropped: null,
+    _craftCooldown: 0,
     ateFromInventory: false,
     pickedUpBerry: false,
+    gathering: false,
+    gatherTimer: 0,
+    gatherDuration: 0,
+    seekingResource: false,
+    targetResourceIdx: -1,
+    targetResourceType: '',
+    gatherResult: null,
+    gatherDone: false,
+    foundCrystal: false,
   }
 }
 

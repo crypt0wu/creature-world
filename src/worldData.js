@@ -86,6 +86,41 @@ export const OBSTACLES = WORLD_ITEMS.map(item => ({
   radius: item.collisionRadius,
 }))
 
+// ─── Find a valid position for a resource to respawn ────────
+export function findValidResourcePosition(type) {
+  const SPREAD = 160
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const x = (Math.random() - 0.5) * SPREAD
+    const z = (Math.random() - 0.5) * SPREAD
+    const y = getTerrainHeight(x, z)
+
+    if (type === 'tree' && y < -1.0) continue
+    if ((type === 'rock' || type === 'bush') && y < -0.5) continue
+
+    let blocked = false
+    for (let i = 0; i < PONDS.length; i++) {
+      const dx = x - PONDS[i].cx, dz = z - PONDS[i].cz
+      if (Math.sqrt(dx * dx + dz * dz) < PONDS[i].radius + 4) { blocked = true; break }
+    }
+    if (blocked) continue
+
+    for (let i = 0; i < OBSTACLES.length; i++) {
+      const dx = x - OBSTACLES[i].x, dz = z - OBSTACLES[i].z
+      if (Math.sqrt(dx * dx + dz * dz) < OBSTACLES[i].radius + 2) { blocked = true; break }
+    }
+    if (blocked) continue
+
+    const yOff = type === 'rock' ? 0.1 : type === 'bush' ? 0.15 : 0
+    return [x, y + yOff, z]
+  }
+  // Fallback — near center
+  const x = (Math.random() - 0.5) * 40
+  const z = (Math.random() - 0.5) * 40
+  const y = getTerrainHeight(x, z)
+  const yOff = type === 'rock' ? 0.1 : type === 'bush' ? 0.15 : 0
+  return [x, y + yOff, z]
+}
+
 // ─── Shared mutable animal position registry ───────────────
 // Each GLBAnimal pushes an entry on mount and updates it each frame.
 // Other animals read this array for inter-animal avoidance.

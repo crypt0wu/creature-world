@@ -23,7 +23,7 @@ function clampTarget(target) {
   target.z = Math.max(-CAM_BOUNDS, Math.min(CAM_BOUNDS, target.z))
 }
 
-function Scene({ selectedId, followingId, onSelect, onSync, resetKey }) {
+function Scene({ selectedId, followingId, onSelect, onSync, resetKey, resourceStatesRef }) {
   const controlsRef = useRef()
   const idleTimer = useRef(null)
   const { camera } = useThree()
@@ -221,7 +221,7 @@ function Scene({ selectedId, followingId, onSelect, onSync, resetKey }) {
       <DayNightCycle speed={0.015} />
       <Terrain onClick={handleTerrainClick} />
       <Water />
-      <Trees />
+      <Trees resourceStatesRef={resourceStatesRef} />
       <Fireflies count={300} />
       <Wildlife />
       <CreatureManager
@@ -231,6 +231,7 @@ function Scene({ selectedId, followingId, onSelect, onSync, resetKey }) {
         followingId={followingId}
         onSelect={onSelect}
         onSync={onSync}
+        resourceStatesRef={resourceStatesRef}
       />
     </>
   )
@@ -301,6 +302,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null)
   const [followingId, setFollowingId] = useState(null)
   const [resetKey, setResetKey] = useState(0)
+  const resourceStatesRef = useRef([])
 
   const handleSync = useCallback((creatures, worldClock, log) => {
     setDisplayData({ creatures, worldClock, log })
@@ -338,6 +340,7 @@ export default function App() {
           onSelect={handleSelect}
           onSync={handleSync}
           resetKey={resetKey}
+          resourceStatesRef={resourceStatesRef}
         />
       </Canvas>
 

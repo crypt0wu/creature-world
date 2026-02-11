@@ -1,4 +1,17 @@
-export const MAX_INVENTORY = 5
+import { evaluateDrop, recordDecision } from './scoring'
+
+export const MAX_INVENTORY = 8
+
+export const ITEM_DEFS = {
+  wood:            { label: 'Wood' },
+  stone:           { label: 'Stone' },
+  herb:            { label: 'Herb' },
+  crystal:         { label: 'Crystal' },
+  berry:           { label: 'Wild Berry' },
+  stone_blade:     { label: 'Stone Blade' },
+  wooden_shield:   { label: 'Wooden Shield' },
+  healing_potion:  { label: 'Healing Potion' },
+}
 
 const PICKUP_CHANCES = {
   sneaky: 0.55,
@@ -15,11 +28,44 @@ export function getPickupChance(personality) {
   return PICKUP_CHANCES[personality] ?? 0.30
 }
 
+export function countItemsByType(c, type) {
+  let n = 0
+  for (let i = 0; i < c.inventory.length; i++) {
+    if (c.inventory[i].type === type) n++
+  }
+  return n
+}
+
 export function tryPickupBerry(c) {
   if (c.inventory.length >= MAX_INVENTORY) return false
   if (Math.random() >= getPickupChance(c.personality)) return false
   c.inventory.push({ type: 'berry', hungerRestore: 60 })
   return true
+}
+
+export function trySmartPickup(c, itemType, speciesMemory) {
+  if (c.inventory.length < MAX_INVENTORY) {
+    c.inventory.push({ type: itemType })
+    return { picked: true, dropped: null }
+  }
+
+  const result = evaluateDrop(c, itemType, speciesMemory)
+  if (result.shouldDrop) {
+    const droppedItem = c.inventory.splice(result.dropIndex, 1)[0]
+    c.inventory.push({ type: itemType })
+    recordDecision(c, droppedItem.type, itemType)
+    return {
+      picked: true,
+      dropped: {
+        type: droppedItem.type,
+        x: c.x,
+        z: c.z,
+        reason: result.reason,
+      },
+    }
+  }
+
+  return { picked: false, dropped: null }
 }
 
 export function eatFromInventory(c) {

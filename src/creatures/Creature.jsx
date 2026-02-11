@@ -7,6 +7,7 @@ import SPECIES from './species'
 import { setHover, clearHover } from '../hoverStore'
 
 const BITE_COUNT = 15
+const GATHER_COLORS = { wood: '#aa7744', stone: '#99aaaa', herb: '#66cc66', crystal: '#aa66ff' }
 
 export default function Creature({ creaturesRef, index, isSelected, onSelect }) {
   const groupRef = useRef()
@@ -19,12 +20,15 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
   const biteRef = useRef()
   const floatTextRef = useRef()
   const labelRef = useRef()
+  const progressRef = useRef()
+  const progressBarRef = useRef()
 
   const c = creaturesRef.current[index]
   const spec = SPECIES[c.species]
   const timer = useRef(0)
   const wasEating = useRef(false)
   const wasSleeping = useRef(false)
+  const wasGathering = useRef(false)
   const zzzRef = useRef()
   const zzzTimer = useRef(0)
   const biteVelocities = useRef([])
@@ -34,9 +38,9 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
   const floatColor = useRef('#44ff88')
   const floatLabel = useRef('')
   const prevInventoryLen = useRef(c.inventory?.length || 0)
+  const crystalFlash = useRef(0)
 
   const { camera } = useThree()
-  // detailLevel: 0 = name only, 1 = name + HP, 2 = name + status + HP
   const [display, setDisplay] = useState({
     hp: c.hp, maxHp: c.maxHp, state: c.state, alive: c.alive, detailLevel: 2,
   })
@@ -56,13 +60,17 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
     groupRef.current.visible = true
     const y = getTerrainHeight(creature.x, creature.z)
 
-    // ── Position: walking bob or eating chew-bounce ──
+    // ── Position: walking bob or eating chew-bounce or gathering work-bounce ──
     const eatBounce = creature.eating ? Math.abs(Math.sin(creature.phase * 5)) * 0.12 : 0
     const walkBob = creature.moving ? Math.sin(creature.phase * 3) * 0.08 : 0
-    groupRef.current.position.set(creature.x, y + 1.2 + walkBob + eatBounce, creature.z)
+    // Rhythmic hammering bounce — sharp downward stroke with quick recovery
+    const gatherBounce = creature.gathering
+      ? Math.abs(Math.sin(creature.phase * 4)) ** 3 * 0.18
+      : 0
+    groupRef.current.position.set(creature.x, y + 1.2 + walkBob + eatBounce - gatherBounce, creature.z)
     groupRef.current.rotation.y = creature.rotY
 
-    // ── Core pulse: sleeping breathing / eating bounce / normal ──
+    // ── Core pulse: sleeping breathing / eating bounce / gathering fast pulse / normal ──
     if (coreRef.current) {
       if (creature.sleeping) {
         const pulse = 1 + Math.sin(creature.phase * 1.5) * 0.06
@@ -70,6 +78,13 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
       } else if (creature.eating) {
         const pulse = 1 + Math.sin(creature.phase * 6) * 0.1
         coreRef.current.scale.setScalar(pulse)
+      } else if (creature.gathering) {
+        // Rhythmic squash-stretch like hammering: flatten on impact, stretch on recovery
+        const t = creature.phase * 4
+        const impact = Math.abs(Math.sin(t)) ** 3
+        const sx = 1 + impact * 0.15
+        const sy = 1 - impact * 0.12
+        coreRef.current.scale.set(sx, sy, sx)
       } else {
         const s = coreRef.current.scale.x
         if (Math.abs(s - 1) > 0.01) coreRef.current.scale.setScalar(s + (1 - s) * 5 * dt)
@@ -77,16 +92,24 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
       }
     }
 
-    // ── Emissive / light: dim while sleeping, bright while eating ──
+    // ── Emissive / light: dim while sleeping, bright while eating/gathering ──
     if (coreRef.current?.material) {
       let target = 0.8
       if (creature.sleeping) target = 0.2 + Math.sin(creature.phase * 1.5) * 0.05
       else if (creature.eating) target = 1.5
+      else if (creature.gathering) target = 1.2
+
+      // Crystal flash override
+      if (crystalFlash.current > 0) {
+        target = 3.0
+        crystalFlash.current -= dt
+      }
+
       const cur = coreRef.current.material.emissiveIntensity
       coreRef.current.material.emissiveIntensity = cur + (target - cur) * 4 * dt
     }
     if (lightRef.current) {
-      const target = creature.sleeping ? 1 : creature.eating ? 6 : 3
+      const target = creature.sleeping ? 1 : creature.eating ? 6 : creature.gathering ? 5 : 3
       lightRef.current.intensity += (target - lightRef.current.intensity) * 4 * dt
     }
 
@@ -148,12 +171,29 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
     }
 
     // ── Detect eating transitions ──
-    const justStarted = creature.eating && !wasEating.current
-    const justFinished = !creature.eating && wasEating.current
+    const justStartedEating = creature.eating && !wasEating.current
+    const justFinishedEating = !creature.eating && wasEating.current
     wasEating.current = creature.eating
 
+    // ── Detect gathering transitions ──
+    const justStartedGathering = creature.gathering && !wasGathering.current
+    const justFinishedGathering = !creature.gathering && wasGathering.current
+    wasGathering.current = creature.gathering
+
     // ── Bite particles on eating start ──
-    if (justStarted) {
+    if (justStartedEating) {
+      _spawnBiteParticles('#44ff88')
+    }
+
+    // ── Gather particles: burst on start + periodic during gathering ──
+    if (justStartedGathering || (creature.gathering && biteLife.current <= 0 && Math.random() < 0.08)) {
+      const color = creature.targetResourceType === 'tree' ? '#aa7744'
+        : creature.targetResourceType === 'rock' ? '#99aaaa'
+        : '#66cc66'
+      _spawnBiteParticles(color)
+    }
+
+    function _spawnBiteParticles(color) {
       biteLife.current = 0.8
       biteVelocities.current = []
       for (let i = 0; i < BITE_COUNT; i++) {
@@ -168,6 +208,7 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
       }
       if (biteRef.current) {
         biteRef.current.visible = true
+        biteRef.current.material.color.set(color)
         biteRef.current.geometry.attributes.position.needsUpdate = true
       }
     }
@@ -191,18 +232,58 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
       }
     }
 
-    // ── Detect inventory pickup ──
-    const invLen = creature.inventory?.length || 0
-    if (invLen > prevInventoryLen.current && creature.alive) {
-      floatTimer.current = 1.5
+    // ── Detect gather completion: show float text ──
+    if (creature.gatherDone) {
+      creature.gatherDone = false
+      const r = creature.gatherResult
+      if (r) {
+        const typeLabel = r.type.charAt(0).toUpperCase() + r.type.slice(1)
+        floatTimer.current = 1.5
+        floatValue.current = 0
+        floatColor.current = GATHER_COLORS[r.type] || '#88aa88'
+        floatLabel.current = `+${r.qty} ${typeLabel}`
+        creature.gatherResult = null
+      }
+    }
+
+    // ── Crystal drop flash ──
+    if (creature.foundCrystal) {
+      creature.foundCrystal = false
+      crystalFlash.current = 0.3
+      // Show crystal float text after a tiny delay (gather text goes first)
+      setTimeout(() => {
+        floatTimer.current = 2.0
+        floatValue.current = 0
+        floatColor.current = '#aa66ff'
+        floatLabel.current = '+1 Crystal!'
+      }, 200)
+    }
+
+    // ── Detect crafting completion: show float text ──
+    if (creature.justCrafted) {
+      const recipe = creature.justCrafted.recipe
+      creature.justCrafted = null
+      floatTimer.current = 2.0
       floatValue.current = 0
-      floatColor.current = '#ff6699'
-      floatLabel.current = '+1 Berry'
+      floatColor.current = recipe.slot ? '#ffcc44' : '#44ff88'
+      floatLabel.current = `Crafted ${recipe.label}!`
+      crystalFlash.current = 0.2
+    }
+
+    // ── Detect inventory pickup (berry only — gathering has its own text) ──
+    const invLen = creature.inventory?.length || 0
+    if (invLen > prevInventoryLen.current && creature.alive && !creature.gatherDone) {
+      if (!creature.gathering && floatTimer.current <= 0 && !justFinishedGathering) {
+        floatTimer.current = 1.5
+        floatValue.current = 0
+        floatColor.current = '#ff6699'
+        floatLabel.current = '+1 Berry'
+      }
     }
     prevInventoryLen.current = invLen
 
-    // ── Floating text (hunger gain or wake) ──
-    if (justFinished) {
+    // ── Floating text (hunger gain or wake or gather) ──
+    if (justFinishedEating) {
       floatTimer.current = 1.5
       floatValue.current = creature.lastHungerGain || 60
       floatColor.current = '#44ff88'
@@ -225,12 +306,29 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
       }
     }
 
+    // ── Gathering progress bar ──
+    if (progressRef.current) {
+      if (creature.gathering && creature.gatherDuration > 0) {
+        const pct = Math.min(1, 1 - Math.max(0, creature.gatherTimer) / creature.gatherDuration)
+        progressRef.current.style.display = 'block'
+        if (progressBarRef.current) {
+          progressBarRef.current.style.width = `${pct * 100}%`
+          // Color shifts from white to resource color as it progresses
+          const color = creature.targetResourceType === 'tree' ? '#aa7744'
+            : creature.targetResourceType === 'rock' ? '#99aaaa'
+            : '#66cc66'
+          progressBarRef.current.style.background = color
+        }
+      } else {
+        progressRef.current.style.display = 'none'
+      }
+    }
+
     // ── Per-frame label scale (clamped) ──
     if (labelRef.current && groupRef.current) {
       const camDist = camera.position.distanceTo(groupRef.current.position)
-      // Map distance to scale: close (20) → 1.3, far (150) → 0.65
       const t = Math.max(0, Math.min(1, (camDist - 20) / 130))
-      const scale = 1.3 - t * 0.65  // 1.3 at close, 0.65 at far
+      const scale = 1.3 - t * 0.65
       labelRef.current.style.transform = `scale(${scale})`
     }
 
@@ -299,7 +397,7 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
         ))}
       </group>
 
-      {/* Bite particles */}
+      {/* Bite/gather particles */}
       <points ref={biteRef} visible={false}>
         <bufferGeometry>
           <bufferAttribute
@@ -327,6 +425,8 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
                 : display.state === 'seeking food' ? '#ffcc44'
                 : display.state === 'hungry' ? '#ffaa44'
                 : display.state === 'tired' ? '#44aaff'
+                : display.state === 'gathering' ? '#aa7744'
+                : display.state === 'seeking resource' ? '#888866'
                 : '#666',
               textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '6px',
               textShadow: '0 0 4px rgba(0,0,0,0.8)',
@@ -356,7 +456,25 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect }) 
         </div>
       </Html>
 
-      {/* Floating text (hunger gain / wake) */}
+      {/* Gathering progress bar */}
+      <Html position={[0, 3.6, 0]} center sprite zIndexRange={[0, 0]}>
+        <div ref={progressRef} style={{
+          pointerEvents: 'none', userSelect: 'none',
+          width: '50px', height: '5px',
+          background: 'rgba(0,0,0,0.6)',
+          borderRadius: '3px', overflow: 'hidden',
+          display: 'none',
+          boxShadow: '0 0 4px rgba(0,0,0,0.5)',
+        }}>
+          <div ref={progressBarRef} style={{
+            width: '0%', height: '100%',
+            borderRadius: '3px',
+            transition: 'width 0.1s linear',
+          }} />
+        </div>
+      </Html>
+
+      {/* Floating text (hunger gain / wake / gather) */}
       <Html position={[0, 4.2, 0]} center sprite zIndexRange={[0, 0]}>
         <div ref={floatTextRef} style={{
           pointerEvents: 'none', userSelect: 'none', whiteSpace: 'nowrap',

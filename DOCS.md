@@ -24,18 +24,23 @@ src/
 │   ├── Fireflies.jsx        # 300+ instanced firefly particles
 │   ├── Wildlife.jsx         # 12 NPC animal species, fish, butterflies
 │   ├── FoodSources.jsx      # Berry bush visuals, shrink/shake/pop effects
-│   └── CreatureUI.jsx       # Roster, stats panel, activity log, world clock
+│   ├── DroppedItems.jsx     # Ground items from smart drops, countdown, pickup
+│   └── CreatureUI.jsx       # Roster, 6-section stats panel, activity log, thinking AI
 │
 ├── creatures/
 │   ├── Creature.jsx         # Individual creature 3D rendering + eating/sleeping effects
 │   ├── CreatureManager.jsx  # Per-frame simulation loop, food lifecycle, save/sync
 │   ├── creatureData.js      # Creature spawning, name generation, initial stats
 │   ├── creatureStore.js     # localStorage save/load/clear
-│   ├── inventory.js         # Inventory system — pickup chances, eat from inventory
+│   ├── inventory.js         # Inventory system — pickup chances, eat from inventory, smart drops
+│   ├── crafting.js          # Recipes, auto-craft, equipment, potions
+│   ├── scoring.js           # Item valuation, species memory, strategy memory
 │   ├── behaviors/
 │   │   ├── index.js         # Behavior pipeline orchestrator
 │   │   ├── wander.js        # Pathfinding, obstacle avoidance, edge repulsion
 │   │   ├── hunger.js        # Food system, eating, starvation
+│   │   ├── gathering.js     # Resource gathering — wood, stone, herbs, crystals
+│   │   ├── crafting.js      # Auto-craft behavior, auto-equip, auto-use potions
 │   │   ├── energy.js        # Energy drain, tiredness, sleep/wake cycle
 │   │   ├── combat.js        # Stub — proximity, aggression, damage, XP
 │   │   └── leveling.js      # XP thresholds, stat gains on level-up
@@ -97,7 +102,7 @@ Six species, one creature each at world start. All render as glowing orbs with s
 - **Hunger** — 0–100, drains at species rate per second. Starvation at 0 deals 0.5 HP/s
 - **Energy** — 0–100, drains at species rate per second. Below 25 = tired (slower). At threshold = sleep
 - **Sleeping / sleepTimer / sleepDuration / vulnerable** — sleep state tracking
-- **Inventory** — array of items (max 5 slots), persisted to localStorage
+- **Inventory** — array of items (max 8 slots, types: berry/wood/stone/herb/crystal), persisted to localStorage
 - **Level / XP / Kills** — progression tracking
 - **Age** — seconds alive (incremented per frame)
 
@@ -113,7 +118,7 @@ Six species, one creature each at world start. All render as glowing orbs with s
 
 Update pipeline runs every frame in `CreatureManager.useFrame()`:
 ```
-updateEnergy → updateHunger → updateMovement → updateCombat → checkLevelUp → state determination
+updateEnergy → updateHunger → updateGathering → updateCrafting → updateMovement → updateCombat → checkLevelUp → state determination
 ```
 
 ### Wander (implemented)
@@ -133,13 +138,29 @@ updateEnergy → updateHunger → updateMovement → updateCombat → checkLevel
 - **Completion:** Restores 60 hunger (capped at 100), food despawns with pop effect
 - **Starvation:** At hunger 0, takes 0.5 HP/s damage. Dies when HP hits 0.
 
+### Gathering (implemented)
+- **Resources:** Trees (wood), rocks (stone), bushes (herbs). Rocks have a 12% crystal drop chance.
+- **Decision:** Idle creatures with energy > 20 and inventory space seek nearby resources (range 40)
+- **Preferences:** Fire/bold/fierce → trees, water/ice/gentle → rocks, grass/curious → bushes, else nearest
+- **Duration:** Trees 5s, rocks 4s, bushes 3s
+- **Yield:** Trees 1–3 wood, rocks 1–2 stone (+12% crystal), bushes 1–2 herbs
+- **Energy cost:** Trees 12, rocks 10, bushes 4
+- **Regrow:** Trees 120–180s, rocks 180–300s, bushes 60–120s
+- **Visual depletion:** Resources shrink to 0 on harvest, then slowly regrow back to full size
+- **Claiming:** Only one creature can gather a resource at a time
+- **States:** `seeking resource` (walking to target), `gathering` (harvesting in place)
+- **New creature fields:** `gathering`, `gatherTimer`, `seekingResource`, `targetResourceIdx`, `targetResourceType`, `gatherResult`, `gatherDone`, `foundCrystal`
+- **Logging:** "is chopping/mining/picking", "gathered N type", "found a rare crystal!"
+- **Visuals:** Faster orb pulse during gathering, resource-colored particles, float text on completion, crystal flash effect
+- **Persistence:** Resource depletion states saved/loaded via localStorage
+
 ### Inventory (implemented)
-- **Capacity:** 5 slots per creature
-- **Item type:** Berries (restore 60 hunger each)
-- **Pickup:** After eating at a bush, chance to pick up an extra berry into inventory
+- **Capacity:** 8 slots per creature
+- **Item types:** Berries (restore 60 hunger), wood, stone, herbs, crystals
+- **Berry pickup:** After eating at a bush, chance to pick up an extra berry into inventory
 - **Personality pickup chances:** sneaky 55%, curious 45%, timid/gentle 35%, default 30%, lazy 25%, bold/fierce 0% (never hoard)
 - **Eating from inventory:** When hunger < 40 and creature has berries, eats from inventory before seeking food on the map
-- **Logging:** "picked up a berry (N/5)" and "ate a berry from inventory (+X hunger)"
+- **Logging:** "picked up a berry (N/8)" and "ate a berry from inventory (+X hunger)"
 - **Persistence:** Inventory array saved/loaded via localStorage
 
 ### Energy & Sleep (implemented)
@@ -165,7 +186,7 @@ updateEnergy → updateHunger → updateMovement → updateCombat → checkLevel
 - On level-up: `maxHp += floor(baseHp * 0.1)`, `hp += 10`, `atk += floor(baseAtk * 0.05) + 1`
 
 ### State Determination
-Priority order: sleeping > eating > seeking food > hungry (hunger < 25) > tired (energy < 25) > wandering > idle
+Priority order: sleeping > eating > gathering > seeking food > seeking resource > hungry (hunger < 25) > tired (energy < 25) > wandering > idle
 
 ---
 
@@ -278,12 +299,13 @@ Priority order: sleeping > eating > seeking food > hungry (hunger < 25) > tired 
 - Dead creatures shown at 40% opacity
 
 ### Stats Panel (bottom, when selected)
-- HP / Hunger / Energy progress bars with color coding
-- ATK, SPD, Level, XP, Kills values
-- Personality, Age (HH:MM:SS), Status, Species
-- Inventory display: 5 slots with berry icons, N/5 counter
-- Follow / Unfollow button
-- Close button
+Six-section layout (480px wide, Chakra Petch headers, Space Mono data):
+1. **Header** — Creature name (species-colored), species label, Lv. badge, Follow/Close buttons
+2. **Stat Bars** — HP (green), Hunger (orange), Energy (blue) full-width progress bars
+3. **Stats Grid** — 2 columns: ATK (with red equipment bonus like "14 (+5)"), SPD, XP, Kills, Personality, Age, Status, Species
+4. **Equipment** — Always-visible weapon/armor slots side by side. Filled = emoji + name + stat bonus with colored left border. Empty = dashed outline with dim label
+5. **Inventory** — 8 stacked slots (same items grouped with ×N count badge). Hover for tooltip. Empty slots dashed/dimmed
+6. **Thinking** — Purple-themed AI reasoning box showing creature's current strategy in quotes. Updates every 0.5s
 
 ### Activity Log (right panel)
 - Last 50 events (displays 30), timestamped
