@@ -1,0 +1,20 @@
+export default {
+  name: 'Embrix',
+  type: 'fire',
+  color: '#ff4422',
+  glow: '#ff6600',
+  baseHp: 80,
+  baseAtk: 15,
+  baseSpd: 8,
+  hungerDrain: 0.20,
+  energyDrain: 0.12,
+  pauseMin: 1,
+  pauseMax: 4,
+  range: 25,
+  description: 'Aggressive and fast. Burns energy quickly but hits hard.',
+  behaviorWeights: {
+    aggression: 0.8,
+    exploration: 0.7,
+    caution: 0.2,
+  },
+}

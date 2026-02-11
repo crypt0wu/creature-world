@@ -1,0 +1,20 @@
+export default {
+  name: 'Shadeyn',
+  type: 'dark',
+  color: '#9944cc',
+  glow: '#bb66ff',
+  baseHp: 85,
+  baseAtk: 14,
+  baseSpd: 7,
+  hungerDrain: 0.13,
+  energyDrain: 0.10,
+  pauseMin: 3,
+  pauseMax: 8,
+  range: 20,
+  description: 'Stealthy and cunning. Picks fights carefully, strikes from shadows.',
+  behaviorWeights: {
+    aggression: 0.7,
+    exploration: 0.5,
+    caution: 0.7,
+  },
+}

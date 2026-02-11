@@ -1,0 +1,20 @@
+export default {
+  name: 'Verdox',
+  type: 'grass',
+  color: '#22cc44',
+  glow: '#44ff66',
+  baseHp: 100,
+  baseAtk: 6,
+  baseSpd: 4,
+  hungerDrain: 0.08,
+  energyDrain: 0.06,
+  pauseMin: 8,
+  pauseMax: 20,
+  range: 12,
+  description: 'Passive healer. Barely moves, barely eats. Outlasts everything.',
+  behaviorWeights: {
+    aggression: 0.1,
+    exploration: 0.2,
+    caution: 0.6,
+  },
+}

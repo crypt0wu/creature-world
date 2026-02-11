@@ -1,0 +1,20 @@
+export default {
+  name: 'Voltik',
+  type: 'electric',
+  color: '#ffcc00',
+  glow: '#ffee44',
+  baseHp: 70,
+  baseAtk: 12,
+  baseSpd: 10,
+  hungerDrain: 0.22,
+  energyDrain: 0.15,
+  pauseMin: 0.5,
+  pauseMax: 2,
+  range: 30,
+  description: 'Erratic and fast. Never stops moving. Burns through resources.',
+  behaviorWeights: {
+    aggression: 0.5,
+    exploration: 0.9,
+    caution: 0.3,
+  },
+}

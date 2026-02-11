@@ -1,0 +1,20 @@
+export default {
+  name: 'Glacira',
+  type: 'ice',
+  color: '#66ccff',
+  glow: '#88eeff',
+  baseHp: 130,
+  baseAtk: 16,
+  baseSpd: 3,
+  hungerDrain: 0.07,
+  energyDrain: 0.05,
+  pauseMin: 6,
+  pauseMax: 18,
+  range: 10,
+  description: 'Slow and powerful. Glacial metabolism, devastating attacks.',
+  behaviorWeights: {
+    aggression: 0.4,
+    exploration: 0.2,
+    caution: 0.5,
+  },
+}

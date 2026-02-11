@@ -1,0 +1,28 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0a0f0a;
+}
+
+/* Custom scrollbar — matches game theme */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(5, 10, 5, 0.4);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(80, 200, 120, 0.25);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(80, 200, 120, 0.4);
+}

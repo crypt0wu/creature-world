@@ -1,0 +1,20 @@
+export default {
+  name: 'Aqualis',
+  type: 'water',
+  color: '#2288ff',
+  glow: '#44aaff',
+  baseHp: 120,
+  baseAtk: 8,
+  baseSpd: 4,
+  hungerDrain: 0.10,
+  energyDrain: 0.08,
+  pauseMin: 5,
+  pauseMax: 15,
+  range: 15,
+  description: 'Calm and defensive. Efficient metabolism, hard to take down.',
+  behaviorWeights: {
+    aggression: 0.2,
+    exploration: 0.4,
+    caution: 0.8,
+  },
+}
