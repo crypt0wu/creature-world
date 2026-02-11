@@ -106,6 +106,8 @@ export function updateMovement(c, spec, dt) {
     let avoidX = 0, avoidZ = 0
 
     for (let i = 0; i < OBSTACLES.length; i++) {
+      // Skip avoidance for the resource we're heading toward
+      if (c.seekingResource && i === c.targetResourceIdx) continue
       const obs = OBSTACLES[i]
       const adx = c.x - obs.x
       const adz = c.z - obs.z

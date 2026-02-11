@@ -80,6 +80,9 @@ export function createCreature(speciesName, index) {
     gatherResult: null,
     gatherDone: false,
     foundCrystal: false,
+    _gatherGoal: null,
+    _wantsCraftNow: false,
+    _decisionTimer: 0,
   }
 }
 

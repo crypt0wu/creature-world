@@ -153,6 +153,34 @@ function _getDropReason(newItemType, c) {
   return 'better value'
 }
 
+// ── Pre-gather check: would gathering this resource be useful? ──
+const RESOURCE_TO_ITEM = { tree: 'wood', rock: 'stone', bush: 'herb' }
+
+export function wouldGatherBeUseful(c, resourceType, speciesMemory) {
+  if (c.inventory.length < 8) return true
+
+  const primaryItem = RESOURCE_TO_ITEM[resourceType]
+  if (!primaryItem) return false
+
+  const primaryScore = scoreItem(primaryItem, c, speciesMemory)
+
+  let lowestScore = Infinity
+  for (let i = 0; i < c.inventory.length; i++) {
+    const s = scoreItem(c.inventory[i].type, c, speciesMemory)
+    if (s < lowestScore) lowestScore = s
+  }
+
+  if (primaryScore > lowestScore + 5) return true
+
+  // Rocks can also yield crystals (12% chance, high value)
+  if (resourceType === 'rock') {
+    const crystalScore = scoreItem('crystal', c, speciesMemory)
+    if (crystalScore > lowestScore + 5) return true
+  }
+
+  return false
+}
+
 // ── Species memory: generational learning ───────────────
 export function recordDeath(c, speciesMemory) {
   if (!speciesMemory) return

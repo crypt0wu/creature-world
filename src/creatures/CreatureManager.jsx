@@ -1,4 +1,4 @@
-import { useRef, useMemo } from 'react'
+import { useRef, useMemo, useEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { getTerrainHeight } from '../components/Terrain'
 import { WORLD_ITEMS, OBSTACLES, findValidResourcePosition } from '../worldData'
@@ -39,6 +39,7 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         strategyMemory: [],
         justCrafted: null, justDropped: null, _craftCooldown: 0,
         dropFloatText: null, dropFloatColor: null,
+        _gatherGoal: null, _wantsCraftNow: false, _decisionTimer: 0,
         ...c,
       }))
     }
@@ -67,9 +68,13 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
   const droppedItemsRef = useRef([])
   const speciesMemoryRef = useRef(loadSpeciesMemory())
   const dropIdCounter = useRef(0)
+  const lastRealTimeRef = useRef(Date.now())
+  const simulatingRef = useRef(false)
 
-  useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.05)
+  // ── Core simulation step ────────────────────────────────────
+  // Processes dt seconds of game time. When catching=true (catch-up mode),
+  // visual flags are cleared after logging to prevent duplicate log entries.
+  function simulateTick(dt, catching) {
     const creatures = creaturesRef.current
     const foods = foodsRef.current
     const resourceStates = resourceStatesRef.current
@@ -132,7 +137,7 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         if (logRef.current.length > 50) logRef.current.pop()
       }
 
-      // Gathering event logging (read flags but don't clear — Creature.jsx clears them for visuals)
+      // Gathering event logging
       if (c.alive && c.gatherFailed) {
         const FAIL_MSGS = {
           tree: `${c.name} chopped a tree but found nothing useful`,
@@ -203,7 +208,6 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
           species: c.species,
         })
         if (logRef.current.length > 50) logRef.current.pop()
-        // Don't clear justCrafted here — Creature.jsx reads it for float text
       }
 
       // Potion usage logging
@@ -228,6 +232,8 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         } else if (c.state === 'gathering') {
           const verb = GATHER_VERBS[c.targetResourceType] || 'gathering'
           msg = `${c.name} is ${verb}`
+        } else if (c.state === 'seeking resource' && c._gatherGoal?.reason) {
+          msg = `${c.name}: ${c._gatherGoal.reason}`
         } else {
           msg = `${c.name} is ${c.state}`
         }
@@ -245,6 +251,14 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
           msg: `${c.name} has died!`,
           species: c.species,
         })
+      }
+
+      // During catch-up, clear visual flags to prevent duplicate logs
+      if (catching) {
+        c.gatherDone = false
+        c.gatherResult = null
+        c.foundCrystal = false
+        c.justCrafted = null
       }
     }
 
@@ -293,26 +307,121 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
       // Despawn
       if (di.timer <= 0 && di.active) {
         di.active = false
-        di.popTimer = 0.6
+        di.popTimer = catching ? 0 : 0.6
       }
+    }
+  }
+
+  // ── Background simulation timer ─────────────────────────────
+  // Runs when the tab is hidden and useFrame/rAF is paused.
+  // Browsers throttle setInterval to ~1/s in background tabs.
+  // IMPORTANT: only advance lastRealTimeRef by the time actually processed,
+  // so useFrame can catch up any remainder when the tab becomes active.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (simulatingRef.current) return
+      const now = Date.now()
+      const elapsed = (now - lastRealTimeRef.current) / 1000
+      if (elapsed < 0.5) return // useFrame is still running, let it handle sim
+
+      simulatingRef.current = true
+
+      // Process up to 10s of sim time per background tick (in chunks)
+      let toProcess = Math.min(elapsed, 10.0)
+      // Only advance the clock by what we actually process — rest is caught up later
+      lastRealTimeRef.current += toProcess * 1000
+
+      const stepSize = toProcess > 5 ? 0.5 : 0.2
+      while (toProcess > 0.001) {
+        const dt = Math.min(toProcess, stepSize)
+        simulateTick(dt, true)
+        toProcess -= dt
+      }
+
+      // Save periodically during background operation
+      saveTimer.current += Math.min(elapsed, 10.0)
+      if (saveTimer.current > 5.0) {
+        saveTimer.current = 0
+        saveCreatures(creaturesRef.current)
+        saveWorldClock(worldClockRef.current)
+        saveResourceStates(resourceStatesRef.current)
+        saveSpeciesMemory(speciesMemoryRef.current)
+      }
+
+      simulatingRef.current = false
+    }, 1000)
+
+    // Save state when tab is hidden so nothing is lost if the tab is killed
+    function onVisChange() {
+      if (document.hidden) {
+        saveCreatures(creaturesRef.current)
+        saveWorldClock(worldClockRef.current)
+        saveResourceStates(resourceStatesRef.current)
+        saveSpeciesMemory(speciesMemoryRef.current)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisChange)
+
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisChange)
+    }
+  }, [])
+
+  // ── Main render loop ────────────────────────────────────────
+  // Uses real wall-clock time instead of rAF delta, with catch-up
+  // for any time missed while the tab was hidden.
+  useFrame(() => {
+    if (simulatingRef.current) return
+    simulatingRef.current = true
+
+    const now = Date.now()
+    let totalElapsed = (now - lastRealTimeRef.current) / 1000
+    lastRealTimeRef.current = now
+
+    // Cap catch-up at 30 minutes to avoid freezing
+    totalElapsed = Math.min(totalElapsed, 1800)
+
+    const isCatchUp = totalElapsed > 0.1
+
+    // Unified simulation loop — processes ALL elapsed time in adaptive steps.
+    // Adaptive step sizes: larger for bigger backlogs (faster), smaller for precision.
+    // The very last step keeps visual flags (catching=false) for Creature.jsx float text.
+    let remaining = totalElapsed
+    while (remaining > 0.001) {
+      const maxStep = remaining > 300 ? 1.0 : remaining > 10 ? 0.2 : 0.05
+      const dt = Math.min(remaining, maxStep)
+      remaining -= dt
+      const isLastStep = remaining <= 0.001
+      simulateTick(dt, !isLastStep)
     }
 
     // Camera follow
     if (followingId && controlsRef?.current) {
+      const creatures = creaturesRef.current
       const c = creatures.find(c => c.id === followingId)
       if (c && c.alive) {
         const y = getTerrainHeight(c.x, c.z)
         const target = controlsRef.current.target
-        target.x += (c.x - target.x) * 3 * dt
-        target.y += (y + 1 - target.y) * 3 * dt
-        target.z += (c.z - target.z) * 3 * dt
+        if (isCatchUp) {
+          // Snap camera after catch-up
+          target.x = c.x
+          target.y = y + 1
+          target.z = c.z
+        } else {
+          const camDt = Math.min(totalElapsed, 0.05)
+          target.x += (c.x - target.x) * 3 * camDt
+          target.y += (y + 1 - target.y) * 3 * camDt
+          target.z += (c.z - target.z) * 3 * camDt
+        }
       }
     }
 
-    // Sync to parent for UI
-    syncTimer.current += dt
-    if (syncTimer.current > 0.5) {
+    // Sync to parent for UI (always sync after catch-up)
+    syncTimer.current += totalElapsed
+    if (syncTimer.current > 0.5 || isCatchUp) {
       syncTimer.current = 0
+      const creatures = creaturesRef.current
       onSync(
         creatures.map(c => ({ ...c })),
         worldClockRef.current,
@@ -321,14 +430,17 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
     }
 
     // Save to localStorage
-    saveTimer.current += dt
+    saveTimer.current += totalElapsed
     if (saveTimer.current > 5.0) {
       saveTimer.current = 0
+      const creatures = creaturesRef.current
       saveCreatures(creatures)
       saveWorldClock(worldClockRef.current)
-      saveResourceStates(resourceStates)
-      saveSpeciesMemory(speciesMemory)
+      saveResourceStates(resourceStatesRef.current)
+      saveSpeciesMemory(speciesMemoryRef.current)
     }
+
+    simulatingRef.current = false
   })
 
   return (

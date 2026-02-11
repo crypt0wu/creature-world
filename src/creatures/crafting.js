@@ -58,6 +58,64 @@ export function canCraft(inventory, recipe) {
   return true
 }
 
+// ── What materials are still missing for a recipe? ───────
+export function getMissingMaterials(inventory, recipe) {
+  const counts = countMaterials(inventory)
+  const missing = {}
+  for (const [mat, needed] of Object.entries(recipe.materials)) {
+    const have = counts[mat] || 0
+    if (have < needed) missing[mat] = needed - have
+  }
+  return missing
+}
+
+// ── Best recipe goal for a creature (craftable or closest) ──
+export function getBestGoalRecipe(c) {
+  const counts = countMaterials(c.inventory)
+  const hasWeapon = !!c.equipment?.weapon
+  const hasArmor = !!c.equipment?.armor
+  const hpRatio = c.hp / Math.max(c.maxHp, 1)
+
+  const evaluated = []
+  for (const recipe of RECIPES) {
+    const missing = getMissingMaterials(c.inventory, recipe)
+    const craftableNow = Object.keys(missing).length === 0
+
+    // Skip equipment we already have
+    if (recipe.slot === SLOT_WEAPON && hasWeapon) continue
+    if (recipe.slot === SLOT_ARMOR && hasArmor) continue
+    // Potions are ALWAYS worth crafting — they're survival items for later
+
+    // Completion ratio
+    let totalNeeded = 0, totalHave = 0
+    for (const [mat, needed] of Object.entries(recipe.materials)) {
+      totalNeeded += needed
+      totalHave += Math.min(counts[mat] || 0, needed)
+    }
+    const completionRatio = totalHave / Math.max(totalNeeded, 1)
+
+    let priority = completionRatio * 50
+    if (craftableNow) priority += 100
+    // Potions: always worth crafting, higher priority when hurt
+    if (recipe.id === 'healing_potion' && craftableNow) priority += 10 // base craft bonus
+    if (recipe.id === 'healing_potion' && hpRatio < 0.7) priority += 40
+    if (recipe.id === 'healing_potion' && hpRatio < 0.5) priority += 30
+    if (recipe.slot === SLOT_WEAPON && !hasWeapon) priority += 20
+    if (recipe.slot === SLOT_ARMOR && !hasArmor) priority += 15
+
+    const p = c.personality
+    if ((p === 'fierce' || p === 'bold') && recipe.slot === SLOT_WEAPON) priority += 10
+    if ((p === 'timid' || p === 'gentle') && recipe.slot === SLOT_ARMOR) priority += 10
+    if ((p === 'timid' || p === 'gentle') && recipe.id === 'healing_potion') priority += 5
+
+    evaluated.push({ recipe, missing, craftableNow, priority, completionRatio })
+  }
+
+  if (evaluated.length === 0) return null
+  evaluated.sort((a, b) => b.priority - a.priority)
+  return evaluated[0]
+}
+
 // ── Total materials consumed by a recipe ────────────────
 function totalMaterialCount(recipe) {
   let n = 0
@@ -176,9 +234,9 @@ export function chooseCraftRecipe(c) {
   // Build craftable list (equipment only)
   const craftable = RECIPES.filter(r => r.slot !== null && canCraft(c.inventory, r))
   if (craftable.length === 0) {
-    // Try potion even if not hurt
+    // No equipment to craft — craft potions as survival stockpile
     const potion = RECIPES.find(r => r.id === 'healing_potion')
-    if (canCraft(c.inventory, potion) && c.hp < c.maxHp) return potion
+    if (canCraft(c.inventory, potion)) return potion
     return null
   }
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import SPECIES from '../creatures/species'
 import { ITEM_DEFS, MAX_INVENTORY } from '../creatures/inventory'
-import { EQUIPMENT_DEFS } from '../creatures/crafting'
+import { EQUIPMENT_DEFS, RECIPES, canCraft } from '../creatures/crafting'
 
 const FONT_HEADER = "'Chakra Petch', sans-serif"
 const FONT_DATA = "'Space Mono', monospace"
@@ -61,27 +61,26 @@ function generateThinkingText(c) {
   }
 
   if (c.gathering) {
-    if (c.targetResourceType === 'tree') {
-      if (woodCount >= 1 && !eq.armor) return "Chopping this tree for wood. One more and I can craft a Wooden Shield."
-      if (stoneCount >= 2 && woodCount === 0 && !eq.weapon) return "Need wood to finish my Stone Blade recipe. Almost there."
-      return "Chopping this tree for wood. Can always use more."
-    }
-    if (c.targetResourceType === 'rock') {
-      if (stoneCount >= 1 && woodCount >= 1 && !eq.weapon) return "Mining stone. One more and I can forge a Stone Blade!"
-      return "Mining this rock for stone. Maybe I'll find a crystal."
-    }
-    if (c.targetResourceType === 'bush') {
-      if (herbCount >= 1 && hpPct < 0.8) return "Picking herbs. One more and I can brew a Healing Potion."
-      return "Gathering herbs from this bush. Good for potions."
-    }
+    const goal = c._gatherGoal
+    const GATHER_ACTIONS = { tree: 'Chopping a tree', rock: 'Mining a rock', bush: 'Picking herbs' }
+    const action = GATHER_ACTIONS[c.targetResourceType] || 'Gathering'
+    if (goal?.reason) return `${action}. ${goal.reason}.`
+    // Fallback
+    if (c.targetResourceType === 'tree') return "Chopping this tree for wood."
+    if (c.targetResourceType === 'rock') return "Mining this rock for stone."
+    if (c.targetResourceType === 'bush') return "Gathering herbs from this bush."
     return "Gathering resources..."
   }
 
   if (c.seekingResource) {
-    const targetNames = { tree: 'a tree to chop', rock: 'a rock to mine', bush: 'a bush to pick' }
+    const goal = c._gatherGoal
+    const targetNames = { tree: 'a tree', rock: 'a rock', bush: 'a bush' }
     const target = targetNames[c.targetResourceType] || 'a resource'
-    if (invFull) return `Inventory full, but heading to ${target}. Will drop something less useful.`
-    return `Heading to ${target}. Need materials for crafting.`
+    if (goal?.reason) {
+      if (invFull) return `${goal.reason}. Heading to ${target} — will drop something less useful.`
+      return `${goal.reason}. Heading to ${target}.`
+    }
+    return `Heading to ${target}. Looking for useful materials.`
   }
 
   if (c.seekingFood) {
@@ -103,27 +102,58 @@ function generateThinkingText(c) {
     return "Running low on energy. Slowing down to conserve what I have."
   }
 
-  // Idle/wandering
-  if (c._craftCooldown <= 0) {
-    if (herbCount >= 2 && hpPct < 0.7) return "I have enough herbs to brew a healing potion. Should craft one."
-    if (stoneCount >= 2 && woodCount >= 1 && !eq.weapon) return `Got ${stoneCount} stone and ${woodCount} wood. Time to craft a Stone Blade!`
-    if (woodCount >= 2 && !eq.armor) return "Two wood in hand. I can make a Wooden Shield for protection."
+  // Idle/wandering — check if anything is craftable FIRST
+  const craftableRecipes = RECIPES.filter(r => canCraft(inv, r))
+  if (craftableRecipes.length > 0) {
+    const names = craftableRecipes.map(r => r.label)
+    const potionCount = Math.floor(herbCount / 2)
+    if (potionCount > 1 && craftableRecipes.some(r => r.id === 'healing_potion')) {
+      return `I have ${herbCount} herbs. I can craft ${potionCount} Healing Potions. Starting to craft.`
+    }
+    if (craftableRecipes.length === 1) {
+      return `I have the materials for ${names[0]}. Time to craft!`
+    }
+    return `I can craft ${names.join(' and ')}. Let me get to work.`
   }
 
-  if (eq.weapon && eq.armor) return "Fully equipped and ready for anything. Just exploring."
-  if (!eq.weapon && !eq.armor && c.level > 1) return "No equipment yet. Should gather materials to craft something."
-
-  const personalityLines = {
-    bold: "Looking for action. Nothing interesting happening right now.",
-    timid: "Staying cautious. Keeping an eye out for danger.",
-    curious: "Exploring the area. Wonder what I'll find next.",
-    lazy: "Taking it easy. No rush to do anything.",
-    fierce: "Ready for a fight. Just need something to hit.",
-    gentle: "Peacefully wandering. The world is calm right now.",
-    sneaky: "Moving quietly. Might find something useful if I look carefully.",
-    loyal: "Patrolling the area. Keeping things in order.",
+  // Decision engine goal (always show if present)
+  const goal = c._gatherGoal
+  if (goal && goal.reason) {
+    if (goal.action === 'craft') return goal.reason
+    if (goal.action === 'gather') return goal.reason
+    if (goal.action === 'idle') return goal.reason
   }
-  return personalityLines[c.personality] || "Just wandering around, deciding what to do next."
+
+  // Goal-based text — what should this creature be working toward?
+  const potionCount = inv.filter(i => i.type === 'healing_potion').length
+
+  if (!eq.weapon) {
+    if (stoneCount >= 1 || woodCount >= 1) {
+      return `Goal: Craft Stone Blade. Have ${stoneCount}/2 stone, ${woodCount}/1 wood.`
+    }
+    return "Goal: Craft a Stone Blade. Need to gather stone and wood."
+  }
+
+  if (!eq.armor) {
+    if (woodCount >= 1) {
+      return `Goal: Craft Wooden Shield. Have ${woodCount}/2 wood.`
+    }
+    return "Goal: Craft a Wooden Shield. Need to gather wood."
+  }
+
+  // Has weapon + armor — potion and endgame goals
+  if (herbCount >= 1 && herbCount < 2) {
+    return `Goal: Craft Healing Potion. Have ${herbCount}/2 herbs.`
+  }
+  if (potionCount > 0 && invFull) {
+    return `Fully equipped with ${potionCount} potion${potionCount > 1 ? 's' : ''}. Exploring for crystals.`
+  }
+  if (eq.weapon && eq.armor) {
+    return "Fully equipped. Gathering herbs for Healing Potions."
+  }
+
+  if (c.personality === 'lazy') return "Resting between tasks. Will get back to work soon."
+  return "Planning next move..."
 }
 
 // ── Style constants ──────────────────────────────────────────
