@@ -78,7 +78,7 @@ export function updateMovement(c, spec, dt) {
     const fdx = c.x - (c._fleeFromX || 0)
     const fdz = c.z - (c._fleeFromZ || 0)
     const fleeDist = Math.sqrt(fdx * fdx + fdz * fdz)
-    const minDist = c._fleeMinDist || 30
+    const minDist = c._fleeMinDist
     const farEnough = fleeDist >= minDist
 
     if (c._fleeSprint > 0 || !farEnough) {

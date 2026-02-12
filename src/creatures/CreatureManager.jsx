@@ -314,7 +314,7 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         c.combatEscaped = false
         logRef.current.unshift({
           time: worldClockRef.current,
-          msg: `${c.name} escaped safely!`,
+          msg: `${c.name} escaped and is recovering`,
           species: c.species,
         })
         if (logRef.current.length > 50) logRef.current.pop()
@@ -493,14 +493,17 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         c.combatInterrupted = false
         c.combatIntimidated = null
         c.combatLetGo = null
-        c._chaseDelayTimer = 0
-        c._chaseDelayTarget = null
+        // NOTE: do NOT reset _chaseDelayTimer/_chaseDelayTarget here —
+        // these are active gameplay timers, not visual flags.
+        // Zeroing them skips the 3s head-start window.
         c.combatChaseStarted = null
         c.combatChaseCaught = null
         c.combatChaseEscaped = null
         c.combatChaseGaveUp = null
         c.combatEscaped = false
-        c._pendingEscape = false
+        // NOTE: do NOT reset _pendingEscape here — it's an active
+        // gameplay flag, not a visual flag. Clearing it prevents
+        // the ESCAPED! event from firing when flee sprint expires.
         c.floatingText = null
         c._floatText = null
         c._floatTextColor = null

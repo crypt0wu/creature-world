@@ -1,44 +1,60 @@
 // ── Combat system ──────────────────────────────────────────────
 //
-// FLOW:
+// EXACT COMBAT FLOW:
 //   1. FIGHT: A & B exchange hits every 2s. Only the creature that
-//      just took damage rolls for flee. Max 4 hits each → draw.
-//   2. FLEE: Loser sprints at 2x speed OPPOSITE from winner.
-//      Winner stands still for 3s (head-start window).
-//   3. CHASE DECISION: After 3s delay, winner rolls to chase.
+//      just took damage rolls for flee. Attacker NEVER rolls.
+//      Max 4 hits each → draw.
+//   2. FLEE: Loser sprints at 2x speed in the EXACT OPPOSITE
+//      direction from the winner. Winner stands still.
+//      Show "FLED!" on the fleeing creature. Panicked thinking text.
+//   3. CHASE DECISION: Winner stands still for 3s (head start).
+//      After delay, personality + prey HP roll to chase.
 //      If yes → sprint 1.5x for up to 8s. If no → back to normal.
 //   4. CHASE RESOLUTION: Catch (<3 units) → combat resumes.
 //      Timer expires → chaser gives up, prey gets "ESCAPED!".
 //   5. SCARED: After fleeing ends, 30s scared state. No gather/craft.
+//      Can eat if starving (hunger < 10). Speed 1.3x.
 //
-// RULES:
-//   - Only ONE creature flees. The other is the WINNER.
-//   - States are sequential, never overlapping.
+// CRITICAL RULES:
+//   - Only ONE creature flees. The other is the WINNER. Never both.
+//   - The winner either chases or goes back to normal. Never flees.
+//   - Fleeing creature runs OPPOSITE direction from the winner.
+//   - States are sequential, never overlapping:
+//       Loser:  fighting → fleeing → scared → normal
+//       Winner: fighting → watching → chasing/idle → idle
 //   - The 3s head start is critical for balance.
 
 import { interruptCraft, breakEquipment, EQUIPMENT_DEFS, interruptPotion } from '../crafting'
 
-// Type advantage (attacker type → defender type = 1.5x)
+// ── Type advantage (attacker type → defender type = 1.5x) ──
 const TYPE_ADVANTAGE = {
   fire: 'grass', grass: 'water', water: 'fire',
   electric: 'water', dark: 'electric', ice: 'fire',
 }
 
-// Constants
-const ENGAGE_RADIUS = 12
-const COMBAT_RADIUS = 3.5
-const HIT_INTERVAL = 2.0
-const MAX_HITS = 4             // per creature → 8 total
+// ── Constants ──
+const ENGAGE_RADIUS   = 12
+const COMBAT_RADIUS   = 3.5
+const HIT_INTERVAL    = 2.0
+const MAX_HITS        = 4        // per creature → 8 total = draw
 const COMBAT_COOLDOWN = 60
-const FLEE_SPRINT = 12.0       // seconds of 2x speed sprint
-const SCARED_TIME = 30         // seconds of scared state after fleeing
-const HARD_TIMEOUT = 30        // safety net for stuck fights
-const CHASE_DELAY = 3.0        // seconds winner stands still before deciding
-const CHASE_DURATION = 8.0     // max chase time after delay
-const FLEE_MIN_DIST = 35       // must be this far before allowed to stop
-const CATCH_DIST = 3.0         // distance to catch fleeing prey
+const SCARED_TIME_MIN = 7        // min scared duration
+const SCARED_TIME_MAX = 30       // max scared duration
+const HARD_TIMEOUT    = 30       // safety net for stuck fights
+const CHASE_DELAY     = 3.0      // seconds winner stands still
+const CHASE_DURATION  = 8.0      // max chase time after delay
+const FLEE_MIN_DIST   = 35       // min distance before fleeing creature can stop
+const CATCH_DIST      = 3.0      // distance to catch fleeing prey
+const FLEE_SPRINT_MIN = 10       // min flee sprint duration
+const FLEE_SPRINT_MAX = 12       // max flee sprint duration
 
-// Species type lookup
+// ── Panicked thinking text ──
+const PANIC_TEXTS = [
+  'Run! Get away!', 'Too strong!', 'Must escape!',
+  'No no no!', 'Have to run!', "Can't fight this!",
+]
+
+// ── Species type lookup ──
 const SPECIES_TYPES = {
   Embrix: 'fire', Aqualis: 'water', Verdox: 'grass',
   Voltik: 'electric', Shadeyn: 'dark', Glacira: 'ice',
@@ -46,7 +62,11 @@ const SPECIES_TYPES = {
 
 function getType(c) { return SPECIES_TYPES[c.species] || 'fire' }
 
-// ── Flee roll: simple HP thresholds ──
+// ══════════════════════════════════════════════════════════════
+// HELPER FUNCTIONS
+// ══════════════════════════════════════════════════════════════
+
+// Flee roll — called ONLY on the creature that just took damage
 function rollFlee(c) {
   const pct = c.hp / c.maxHp
   let chance
@@ -64,7 +84,7 @@ function rollFlee(c) {
   return fled
 }
 
-// ── Damage: ATK × random(0.8–1.2) × type bonus, minus armor ──
+// Damage: ATK × random(0.8–1.2) × type bonus − armor
 function calcDamage(attacker, defender) {
   const base = attacker.atk * (0.8 + Math.random() * 0.4)
   const superEff = TYPE_ADVANTAGE[getType(attacker)] === getType(defender)
@@ -75,7 +95,7 @@ function calcDamage(attacker, defender) {
   return { damage: Math.round(dmg), superEff }
 }
 
-// ── Equipment durability tick ──
+// Equipment durability tick
 function tickDurability(c, slot, minLoss, maxLoss) {
   const eq = c.equipment?.[slot]
   if (!eq || eq.durability === undefined) return
@@ -90,7 +110,7 @@ function tickDurability(c, slot, minLoss, maxLoss) {
   }
 }
 
-// ── Interrupt any activity ──
+// Interrupt any current activity
 function interruptActivity(c) {
   if (c.sleeping) { c.sleeping = false; c.sleepTimer = 0; c.vulnerable = false }
   if (c.eating) { c.eating = false; c.eatTimer = 0; c.seekingFood = false; c.targetFoodIdx = -1 }
@@ -104,7 +124,11 @@ function interruptActivity(c) {
   if (c.seekingFood) { c.seekingFood = false; c.targetFoodIdx = -1 }
 }
 
-// ── End combat for one creature (clear combat-specific fields only) ──
+// ══════════════════════════════════════════════════════════════
+// STATE TRANSITIONS — clean and atomic
+// ══════════════════════════════════════════════════════════════
+
+// Clear combat-only fields
 function endCombat(c) {
   c.inCombat = false
   c._combatTarget = null
@@ -113,58 +137,87 @@ function endCombat(c) {
   c._combatDuration = 0
 }
 
-// ── Execute flee: loser sprints away, winner enters chase-delay ──
-function doFlee(runner, winner, allCreatures) {
+// Clear chase fields
+function endChase(c) {
+  c._chasing = false
+  c._chaseTargetId = null
+  c._chaseTimer = 0
+  c._chaseGoingForKill = false
+  c._combatCooldown = COMBAT_COOLDOWN
+}
+
+// Clear all flee/scared fields on a creature (full reset to normal)
+function clearFleeState(c) {
+  c._fleeSprint = 0
+  c._fleeZigzag = 0
+  c._fleeMinDist = 0
+  c._scaredTimer = 0
+  c._scaredOfId = null
+  c._fleeFromX = 0
+  c._fleeFromZ = 0
+  c._pendingEscape = false
+  c._panicTextTimer = 0
+}
+
+// ══════════════════════════════════════════════════════════════
+// PHASE 2: FLEE EXECUTION
+// Runner sprints away, winner enters chase-delay
+// ══════════════════════════════════════════════════════════════
+
+function doFlee(runner, winner) {
   console.log(`[COMBAT] ${runner.name} FLEES from ${winner.name}!`)
 
-  // Runner: end combat, start fleeing
+  // ── RUNNER: end combat, start fleeing ──
+  endCombat(runner)
   runner.xp += 5
   runner.combatFled = { hp: runner.hp, maxHp: runner.maxHp, opponentName: winner.name }
-  runner.floatingText = { text: 'FLED!', color: '#ffaa33', timer: 2.0 }
-  runner._floatText = 'FLED!'
-  runner._floatTextColor = '#ffaa33'
-  runner._floatTextTimer = 2.5
-  runner._pendingEscape = true
 
-  // Set flee state
-  runner._scaredTimer = SCARED_TIME
-  runner._fleeSprint = FLEE_SPRINT
+  // Animated float text: "FLED!" (no Creature.jsx flag handler for combatFled)
+  runner.floatingText = { text: 'FLED!', color: '#ffaa33', timer: 2.0 }
+
+  // Flee state
+  runner._pendingEscape = true
+  const scaredDuration = SCARED_TIME_MIN + Math.random() * (SCARED_TIME_MAX - SCARED_TIME_MIN)
+  runner._scaredTimer = scaredDuration
+  runner._combatCooldown = scaredDuration
+  runner._fleeSprint = FLEE_SPRINT_MIN + Math.random() * (FLEE_SPRINT_MAX - FLEE_SPRINT_MIN)
   runner._fleeMinDist = FLEE_MIN_DIST
   runner._scaredOfId = winner.id
-  runner._fleeFromX = winner.x  // flee FROM the winner's position
+  runner._fleeFromX = winner.x
   runner._fleeFromZ = winner.z
-
-  endCombat(runner)
-  runner._combatCooldown = SCARED_TIME
+  runner._panicTextTimer = 3.0   // wait for FLED! text before cycling panic
 
   // Sprint in EXACT OPPOSITE direction from winner
   const dx = winner.x - runner.x, dz = winner.z - runner.z
   const dist = Math.sqrt(dx * dx + dz * dz) || 1
-  runner.targetX = runner.x - (dx / dist) * 35
-  runner.targetZ = runner.z - (dz / dist) * 35
-  runner.targetX = Math.max(-95, Math.min(95, runner.targetX))
-  runner.targetZ = Math.max(-95, Math.min(95, runner.targetZ))
+  runner.targetX = Math.max(-95, Math.min(95, runner.x - (dx / dist) * 35))
+  runner.targetZ = Math.max(-95, Math.min(95, runner.z - (dz / dist) * 35))
   runner.moving = true
 
-  // Winner: end combat, enter chase-delay (stand still for 3s)
+  // ── WINNER: end combat, stand still for 3s chase-delay ──
   endCombat(winner)
-  winner._combatCooldown = 0  // will be set after chase decision
+  winner._combatCooldown = 0        // set after chase decision
   winner._chaseDelayTimer = CHASE_DELAY
   winner._chaseDelayTarget = runner.id
   winner.moving = false
   winner.currentSpeed = 0
+
   console.log(`[COMBAT] ${winner.name} watches ${runner.name} flee (${CHASE_DELAY}s to decide)`)
 }
 
-// ── Chase decision: personality + prey HP ──
-function evaluateChase(winner, runner, allCreatures) {
+// ══════════════════════════════════════════════════════════════
+// PHASE 3: CHASE DECISION
+// Personality + prey HP determine if winner chases
+// ══════════════════════════════════════════════════════════════
+
+function evaluateChase(winner, runner) {
   // Never chase if HP < 40%
   if (winner.hp < winner.maxHp * 0.40) {
     console.log(`[CHASE] ${winner.name} too hurt to chase (HP ${Math.round(winner.hp / winner.maxHp * 100)}%)`)
     return false
   }
 
-  // Personality-based chance
+  // Personality-based base chance
   const p = winner.personality
   let chance = 0.25
   if (p === 'fierce' || p === 'bold') chance = 0.70
@@ -184,55 +237,53 @@ function evaluateChase(winner, runner, allCreatures) {
   }
 
   const roll = Math.random()
-  console.log(`[CHASE] ${winner.name} (${p}) chase roll: ${Math.round(roll * 100)} vs ${Math.round(chance * 100)}%${goingForKill ? ' (BLOOD!)' : ''} → ${roll < chance ? 'CHASE!' : 'let go'}`)
+  console.log(
+    `[CHASE] ${winner.name} (${p}) chase roll: ${Math.round(roll * 100)} vs ${Math.round(chance * 100)}%` +
+    `${goingForKill ? ' (BLOOD!)' : ''} → ${roll < chance ? 'CHASE!' : 'let go'}`
+  )
 
   if (roll >= chance) return false
 
-  // START CHASE
+  // ── START CHASE ──
   console.log(`[CHASE] ${winner.name} sprints after ${runner.name}!${goingForKill ? ' GOING FOR THE KILL!' : ''}`)
   winner._chasing = true
   winner._chaseTargetId = runner.id
   winner._chaseTimer = CHASE_DURATION
   winner._chaseGoingForKill = goingForKill
   winner._combatCooldown = 0
+
+  // Event flag — Creature.jsx handles float text via combatChaseStarted
   winner.combatChaseStarted = { targetName: runner.name, goingForKill }
-  winner.floatingText = { text: goingForKill ? 'Going for the kill!' : 'Chasing!', color: goingForKill ? '#ff2222' : '#ff4444', timer: 2.0 }
-  winner._floatText = goingForKill ? 'Going for the kill!' : 'Chasing!'
-  winner._floatTextColor = goingForKill ? '#ff2222' : '#ff4444'
-  winner._floatTextTimer = 2.5
+
   winner.targetX = runner.x
   winner.targetZ = runner.z
   winner.moving = true
   return true
 }
 
-// ── End chase state ──
-function endChase(c) {
-  c._chasing = false
-  c._chaseTargetId = null
-  c._chaseTimer = 0
-  c._chaseGoingForKill = false
-  c._combatCooldown = COMBAT_COOLDOWN
-}
+// ══════════════════════════════════════════════════════════════
+// PHASE 5: TRIGGER ESCAPED
+// Called when: winner lets prey go, chaser gives up, chaser exhausted
+// ══════════════════════════════════════════════════════════════
 
-// ── Trigger ESCAPED on prey: stop sprinting, enter scared state ──
-// Called when: (a) winner decides not to chase, (b) chaser gives up, (c) chaser exhausted
 function triggerEscaped(prey, fromName) {
-  prey.floatingText = { text: 'ESCAPED!', color: '#44dd44', timer: 2.0 }
-  prey._floatText = 'ESCAPED!'
-  prey._floatTextColor = '#44dd44'
-  prey._floatTextTimer = 2.5
   prey._pendingEscape = false
   prey.combatEscaped = true
+  // Ensure combatChaseEscaped is set so Creature.jsx shows "Escaped!" float
+  if (!prey.combatChaseEscaped) {
+    prey.combatChaseEscaped = { chaserName: fromName }
+  }
 
-  // Stop sprinting immediately — you're safe now
+  // Stop sprinting — safe now
   prey._fleeSprint = 0
   prey._fleeZigzag = 0
   prey._fleeMinDist = 0
+  prey._panicTextTimer = 0
 
-  // Reset scared timer to a fresh 30s from NOW
-  prey._scaredTimer = SCARED_TIME
-  prey._combatCooldown = SCARED_TIME
+  // Fresh scared timer from NOW
+  const scaredDuration = SCARED_TIME_MIN + Math.random() * (SCARED_TIME_MAX - SCARED_TIME_MIN)
+  prey._scaredTimer = scaredDuration
+  prey._combatCooldown = scaredDuration
 
   console.log(`[COMBAT] ${prey.name} escaped from ${fromName}!`)
 }
@@ -243,25 +294,54 @@ function triggerEscaped(prey, fromName) {
 export function updateCombat(c, allCreatures, spec, dt) {
   if (!c.alive) return
 
-  // ── Tick scared timer ──
+  // ── Tick timers ──
   if (c._scaredTimer > 0) {
     c._scaredTimer -= dt
     if (c._scaredTimer <= 0) {
+      // Scared expired → fully normal
+      c._scaredTimer = 0
       c._scaredOfId = null
       c._fleeMinDist = 0
       c._pendingEscape = false
-      // Scared timer expired → fully back to normal
+      c._panicTextTimer = 0
     }
   }
 
-  // ── Tick flee sprint ──
-  if (c._fleeSprint > 0) c._fleeSprint -= dt
+  if (c._fleeSprint > 0) {
+    c._fleeSprint -= dt
+    // Flee sprint expired naturally (no chaser caught us, no triggerEscaped called)
+    if (c._fleeSprint <= 0 && c._pendingEscape) {
+      c._fleeSprint = 0
+      c._pendingEscape = false
+      c._fleeZigzag = 0
+      c._panicTextTimer = 0
+      c.combatEscaped = true
+      // Creature.jsx handles float text via combatChaseEscaped
+      c.combatChaseEscaped = { chaserName: 'unknown' }
+      // Fresh scared timer from now
+      const scaredDuration = SCARED_TIME_MIN + Math.random() * (SCARED_TIME_MAX - SCARED_TIME_MIN)
+      c._scaredTimer = scaredDuration
+      c._combatCooldown = scaredDuration
+      console.log(`[COMBAT] ${c.name} escaped and is recovering`)
+    }
+  }
 
-  // ── Tick combat cooldown ──
   if (c._combatCooldown > 0) c._combatCooldown -= dt
 
-  // ── Scared: re-sprint if threat comes close ──
-  if (c._scaredTimer > 0 && c._scaredOfId && !c.inCombat && !c._chasing) {
+  // ── Panicked thinking text while fleeing ──
+  if (c._fleeSprint > 0 && c._scaredTimer > 0) {
+    c._panicTextTimer = (c._panicTextTimer || 0) - dt
+    if (c._panicTextTimer <= 0) {
+      c._panicTextTimer = 1.5 + Math.random() * 1.5  // cycle every 1.5–3s
+      const msg = PANIC_TEXTS[Math.floor(Math.random() * PANIC_TEXTS.length)]
+      c._floatText = msg
+      c._floatTextColor = '#ffaa33'
+      c._floatTextTimer = 1.5
+    }
+  }
+
+  // ── Re-sprint if threat comes too close (only while still actively fleeing) ──
+  if (c._scaredTimer > 0 && c._scaredOfId && c._pendingEscape && !c.inCombat && !c._chasing) {
     const threat = allCreatures.find(t => t.id === c._scaredOfId && t.alive)
     if (threat) {
       const tdx = threat.x - c.x, tdz = threat.z - c.z
@@ -269,11 +349,12 @@ export function updateCombat(c, allCreatures, spec, dt) {
       if (d2 < 20 * 20 && c._fleeSprint <= 0) {
         c._fleeSprint = 2.0
         const d = Math.sqrt(d2) || 1
-        c.targetX = c.x - (tdx / d) * 30
-        c.targetZ = c.z - (tdz / d) * 30
-        c.targetX = Math.max(-95, Math.min(95, c.targetX))
-        c.targetZ = Math.max(-95, Math.min(95, c.targetZ))
+        c.targetX = Math.max(-95, Math.min(95, c.x - (tdx / d) * 30))
+        c.targetZ = Math.max(-95, Math.min(95, c.z - (tdz / d) * 30))
         c.moving = true
+        // Update flee-from to threat's current position
+        c._fleeFromX = threat.x
+        c._fleeFromZ = threat.z
       }
     }
   }
@@ -283,45 +364,44 @@ export function updateCombat(c, allCreatures, spec, dt) {
   // ══════════════════════════════════════════════════════════
   if (c._chaseDelayTimer > 0) {
     c._chaseDelayTimer -= dt
-    // Stand still while deciding
+
+    // Stand completely still
     c.moving = false
     c.currentSpeed = 0
 
     // Face the fleeing creature
     const prey = allCreatures.find(t => t.id === c._chaseDelayTarget && t.alive)
     if (prey) {
-      const dx = prey.x - c.x, dz = prey.z - c.z
-      c.rotY = Math.atan2(dx, dz)
+      c.rotY = Math.atan2(prey.x - c.x, prey.z - c.z)
     }
 
-    // Delay expired — make the decision
+    // Delay expired → make the decision
     if (c._chaseDelayTimer <= 0) {
       c._chaseDelayTimer = 0
       const targetId = c._chaseDelayTarget
       c._chaseDelayTarget = null
 
-      const prey2 = allCreatures.find(t => t.id === targetId && t.alive)
-      if (!prey2) {
-        // Prey died or gone during delay
+      const runner = allCreatures.find(t => t.id === targetId && t.alive)
+      if (!runner) {
+        // Prey died during delay
         c._combatCooldown = COMBAT_COOLDOWN / 2
         return
       }
 
-      const chased = evaluateChase(c, prey2, allCreatures)
+      const chased = evaluateChase(c, runner)
       if (!chased) {
-        // Let them go — back to normal immediately
-        console.log(`[COMBAT] ${c.name} let ${prey2.name} go`)
-        c.combatLetGo = { targetName: prey2.name }
+        // Let them go — winner returns to normal immediately
+        console.log(`[COMBAT] ${c.name} let ${runner.name} go`)
+        c.combatLetGo = { targetName: runner.name }
         c._combatCooldown = COMBAT_COOLDOWN / 2
-        // Notify prey they escaped — stop sprinting, enter scared
-        triggerEscaped(prey2, c.name)
+        triggerEscaped(runner, c.name)
       }
     }
     return  // skip everything else while in chase delay
   }
 
   // ══════════════════════════════════════════════════════════
-  // CHASE UPDATE — pursuer sprints after fleeing creature
+  // CHASE — pursuer sprints after fleeing creature
   // ══════════════════════════════════════════════════════════
   if (c._chasing && c._chaseTargetId) {
     c._chaseTimer -= dt
@@ -331,10 +411,7 @@ export function updateCombat(c, allCreatures, spec, dt) {
     if (!prey || c._chaseTimer <= 0) {
       console.log(`[CHASE] ${c.name} gives up the chase`)
       c.combatChaseGaveUp = { targetName: prey?.name || 'unknown' }
-      c.floatingText = { text: 'Gave up', color: '#ffaa44', timer: 2.0 }
-      c._floatText = 'Gave up'
-      c._floatTextColor = '#ffaa44'
-      c._floatTextTimer = 2.5
+      // Float text handled by Creature.jsx via combatChaseGaveUp flag
       if (prey) {
         prey.combatChaseEscaped = { chaserName: c.name }
         triggerEscaped(prey, c.name)
@@ -346,23 +423,18 @@ export function updateCombat(c, allCreatures, spec, dt) {
     const dx = prey.x - c.x, dz = prey.z - c.z
     const dist = Math.sqrt(dx * dx + dz * dz)
 
-    // Caught! Resume combat
+    // CAUGHT — resume combat
     if (dist < CATCH_DIST) {
       console.log(`[CHASE] ${c.name} CATCHES ${prey.name}! (dist: ${dist.toFixed(1)})`)
-      c.combatChaseCaught = { targetName: prey.name }
-      c.floatingText = { text: 'Caught!', color: '#ff2222', timer: 2.0 }
-      prey.floatingText = { text: 'CAUGHT!', color: '#ff2222', timer: 2.0 }
-      prey._floatText = 'CAUGHT!'
-      prey._floatTextColor = '#ff2222'
-      prey._floatTextTimer = 2.5
-      prey._pendingEscape = false
-      endChase(c)
 
-      // Clear prey flee state
-      prey._fleeSprint = 0
-      prey._scaredTimer = 0
-      prey._fleeMinDist = 0
-      prey._scaredOfId = null
+      // Event flag — Creature.jsx handles chaser float via combatChaseCaught
+      c.combatChaseCaught = { targetName: prey.name }
+      // Prey has no flag handler — use floatingText directly
+      prey.floatingText = { text: 'CAUGHT!', color: '#ff2222', timer: 2.0 }
+
+      // End chase + clear prey flee state completely
+      endChase(c)
+      clearFleeState(prey)
 
       // Re-engage combat
       c.inCombat = true
@@ -370,12 +442,14 @@ export function updateCombat(c, allCreatures, spec, dt) {
       c._hitTimer = 0
       c._combatTurns = 0
       c._combatDuration = 0
+      c._combatCooldown = 0
 
       prey.inCombat = true
       prey._combatTarget = c.id
       prey._hitTimer = 1.0  // defender hits 1s after
       prey._combatTurns = 0
       prey._combatDuration = 0
+      prey._combatCooldown = 0
       return
     }
 
@@ -383,10 +457,8 @@ export function updateCombat(c, allCreatures, spec, dt) {
     const angle = Math.atan2(dx, dz)
     c.rotY = angle
     const chaseSpd = c.spd * 0.4 * 1.5
-    c.x += Math.sin(angle) * chaseSpd * dt
-    c.z += Math.cos(angle) * chaseSpd * dt
-    c.x = Math.max(-95, Math.min(95, c.x))
-    c.z = Math.max(-95, Math.min(95, c.z))
+    c.x = Math.max(-95, Math.min(95, c.x + Math.sin(angle) * chaseSpd * dt))
+    c.z = Math.max(-95, Math.min(95, c.z + Math.cos(angle) * chaseSpd * dt))
     c.moving = true
     c.targetX = prey.x
     c.targetZ = prey.z
@@ -395,8 +467,8 @@ export function updateCombat(c, allCreatures, spec, dt) {
     c.energy = Math.max(0, c.energy - 0.3 * dt)
     if (c.energy <= 5) {
       console.log(`[CHASE] ${c.name} exhausted, gives up`)
-      c.combatChaseGaveUp = { targetName: prey.name }
-      c.floatingText = { text: 'Exhausted!', color: '#ffaa44', timer: 2.0 }
+      c.combatChaseGaveUp = { targetName: prey.name, exhausted: true }
+      // Float text handled by Creature.jsx via combatChaseGaveUp flag
       prey.combatChaseEscaped = { chaserName: c.name }
       triggerEscaped(prey, c.name)
       endChase(c)
@@ -410,13 +482,19 @@ export function updateCombat(c, allCreatures, spec, dt) {
   if (c.inCombat && c._combatTarget) {
     const target = allCreatures.find(t => t.id === c._combatTarget)
 
-    // Target gone/dead/fled → end
+    // Target gone, dead, or no longer in combat → end
     if (!target || !target.alive || !target.inCombat) {
       endCombat(c)
       return
     }
 
-    // Hard timeout safety
+    // Safety: target's combat partner isn't us → stale reference, disengage
+    if (target._combatTarget !== c.id) {
+      endCombat(c)
+      return
+    }
+
+    // Hard timeout safety net
     c._combatDuration = (c._combatDuration || 0) + dt
     if (c._combatDuration > HARD_TIMEOUT) {
       console.log(`[COMBAT-TIMEOUT] ${c.name} force-ending after ${HARD_TIMEOUT}s`)
@@ -444,10 +522,8 @@ export function updateCombat(c, allCreatures, spec, dt) {
       c.rotY = Math.atan2(dx, dz)
     }
 
-    // Tick hit timer
+    // Tick hit timer — wait until in range AND timer ready
     c._hitTimer = (c._hitTimer || 0) + dt
-
-    // Not in range or timer not ready → wait
     if (dist > COMBAT_RADIUS || c._hitTimer < HIT_INTERVAL) return
 
     // ── HIT ──
@@ -465,12 +541,8 @@ export function updateCombat(c, allCreatures, spec, dt) {
       target._combatCooldown = COMBAT_COOLDOWN
       // Walk apart
       const d = dist || 1
-      c.targetX = c.x - (dx / d) * 15
-      c.targetZ = c.z - (dz / d) * 15
-      c.moving = true
-      target.targetX = target.x + (dx / d) * 15
-      target.targetZ = target.z + (dz / d) * 15
-      target.moving = true
+      c.targetX = c.x - (dx / d) * 15; c.targetZ = c.z - (dz / d) * 15; c.moving = true
+      target.targetX = target.x + (dx / d) * 15; target.targetZ = target.z + (dz / d) * 15; target.moving = true
       return
     }
 
@@ -489,7 +561,7 @@ export function updateCombat(c, allCreatures, spec, dt) {
     tickDurability(c, 'weapon', 3, 5)
     tickDurability(target, 'armor', 4, 6)
 
-    // Visual flags
+    // Visual event flags (consumed by Creature.jsx)
     c.combatHitDealt = { damage, isSuperEffective: superEff, targetX: target.x, targetZ: target.z }
     target.combatHitTaken = { damage, isSuperEffective: superEff, fromX: c.x, fromZ: c.z }
 
@@ -507,7 +579,7 @@ export function updateCombat(c, allCreatures, spec, dt) {
       c.kills++
       c._combatCooldown = COMBAT_COOLDOWN
 
-      // Loot
+      // Loot 1–2 items
       const looted = []
       const lootN = 1 + (Math.random() < 0.5 ? 1 : 0)
       for (let i = 0; i < lootN && target.inventory.length > 0; i++) {
@@ -524,29 +596,34 @@ export function updateCombat(c, allCreatures, spec, dt) {
       return
     }
 
-    // ── Flee check: ONLY the creature that just took damage (target) rolls ──
-    // The attacker (c) NEVER rolls on this turn
+    // ── Flee check: ONLY the creature that just took damage rolls ──
+    // The attacker (c) NEVER rolls on the same turn
     if (rollFlee(target)) {
-      doFlee(target, c, allCreatures)
+      doFlee(target, c)
     }
-
     return
   }
 
   // ══════════════════════════════════════════════════════════
-  // NOT IN COMBAT — scan for fights
+  // NOT IN COMBAT — scan for new fights
   // ══════════════════════════════════════════════════════════
+
+  // Don't scan if busy or in a post-combat state
   if (c.sleeping || c.eating || c.gathering || c.crafting) return
-  if (c._combatCooldown > 0 || c._scaredTimer > 0 || c._chasing) return
-  if (c._chaseDelayTimer > 0) return  // still deciding about chase
+  if (c._combatCooldown > 0 || c._scaredTimer > 0) return
+  if (c._chasing || c._chaseDelayTimer > 0 || c._fleeSprint > 0) return
 
   for (let i = 0; i < allCreatures.length; i++) {
     const t = allCreatures[i]
     if (t.id === c.id || !t.alive) continue
-    if (t._combatCooldown > 0 && !t.inCombat) continue
-    if (t._scaredTimer > 0) continue
-    if (t._chaseDelayTimer > 0) continue  // still in post-fight decision
 
+    // Skip targets that are in any combat-related state
+    if (t.inCombat) continue
+    if (t._chasing || t._chaseDelayTimer > 0) continue
+    if (t._fleeSprint > 0 || t._scaredTimer > 0) continue
+    if (t._combatCooldown > 0) continue
+
+    // Range check
     const dx = t.x - c.x, dz = t.z - c.z
     if (dx * dx + dz * dz > ENGAGE_RADIUS * ENGAGE_RADIUS) continue
 
@@ -560,7 +637,7 @@ export function updateCombat(c, allCreatures, spec, dt) {
     // Don't fight at very low HP
     if (c.hp < c.maxHp * 0.25) continue
 
-    // ── FIGHT! ──
+    // ── ENGAGE! ──
     console.log(`[COMBAT] ${c.name} engages ${t.name}!`)
     interruptActivity(c)
     if (t.sleeping || t.eating || t.gathering || t.crafting) {
@@ -575,13 +652,11 @@ export function updateCombat(c, allCreatures, spec, dt) {
     c._combatDuration = 0
     c.combatEngaged = { targetName: t.name, targetSpecies: t.species }
 
-    if (!t.inCombat) {
-      t.inCombat = true
-      t._combatTarget = c.id
-      t._hitTimer = 1.0  // defender hits 1s after attacker
-      t._combatTurns = 0
-      t._combatDuration = 0
-    }
+    t.inCombat = true
+    t._combatTarget = c.id
+    t._hitTimer = 1.0  // defender hits 1s after attacker
+    t._combatTurns = 0
+    t._combatDuration = 0
 
     break
   }

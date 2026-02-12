@@ -607,11 +607,12 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
       floatLabel.current = 'Escaped!'
     }
     if (creature.combatChaseGaveUp) {
+      const exhausted = creature.combatChaseGaveUp.exhausted
       creature.combatChaseGaveUp = null
       floatTimer.current = 1.5
       floatValue.current = 0
       floatColor.current = '#ffaa44'
-      floatLabel.current = 'Gave up chase'
+      floatLabel.current = exhausted ? 'Exhausted!' : 'Gave up chase'
     }
 
     // ── Detect inventory pickup (berry only — gathering has its own text) ──
