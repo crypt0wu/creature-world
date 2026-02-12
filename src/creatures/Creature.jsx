@@ -170,10 +170,17 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
     // Combat shake — rapid jitter
     const combatShakeX = creature.inCombat ? Math.sin(creature.phase * 25) * 0.08 : 0
     const combatShakeZ = creature.inCombat ? Math.cos(creature.phase * 30) * 0.08 : 0
+    // Panic shake — rapid trembling when fleeing
+    const panicShakeX = creature._fleeSprint > 0
+      ? (Math.sin(creature.phase * 35) * 0.06 + Math.sin(creature.phase * 53) * 0.04)
+      : (creature._scaredTimer > 0 ? Math.sin(creature.phase * 20) * 0.03 : 0)
+    const panicShakeZ = creature._fleeSprint > 0
+      ? (Math.cos(creature.phase * 40) * 0.06 + Math.cos(creature.phase * 61) * 0.04)
+      : (creature._scaredTimer > 0 ? Math.cos(creature.phase * 25) * 0.03 : 0)
     groupRef.current.position.set(
-      creature.x + combatShakeX,
+      creature.x + combatShakeX + panicShakeX,
       y + 1.2 + walkBob + eatBounce - gatherBounce,
-      creature.z + combatShakeZ
+      creature.z + combatShakeZ + panicShakeZ
     )
     groupRef.current.rotation.y = creature.rotY
 
@@ -183,8 +190,21 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
         // Rapid combat pulse
         const pulse = 1 + Math.sin(creature.phase * 15) * 0.15
         coreRef.current.scale.setScalar(pulse)
+      } else if (creature._fleeSprint > 0) {
+        // Panicked rapid irregular pulse — two overlapping frequencies
+        const pulse = 1 + Math.sin(creature.phase * 18) * 0.12 + Math.sin(creature.phase * 29) * 0.06
+        coreRef.current.scale.setScalar(pulse)
+      } else if (creature._scaredTimer > 0) {
+        // Nervous jittery pulse (after sprint, still scared)
+        const pulse = 1 + Math.sin(creature.phase * 10) * 0.08
+        coreRef.current.scale.setScalar(pulse)
+      } else if (creature._chaseDelayTimer > 0) {
+        // Watching — menacing slow pulse, deciding whether to chase
+        const pulse = 1 + Math.sin(creature.phase * 3) * 0.10
+        coreRef.current.scale.setScalar(pulse)
       } else if (creature._chasing) {
-        const pulse = 1 + Math.sin(creature.phase * 12) * 0.12
+        // Aggressive hunting pulse — slow and powerful
+        const pulse = 1 + Math.sin(creature.phase * 8) * 0.18
         coreRef.current.scale.setScalar(pulse)
       } else if (levelUpGlow.current > 0) {
         const pulse = 1 + Math.sin(creature.phase * 10) * 0.2
@@ -220,8 +240,10 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
     if (coreRef.current?.material) {
       let target = 0.8
       if (creature.inCombat) target = 1.8 + Math.sin(creature.phase * 12) * 0.5
-      else if (creature._chasing) target = 1.6 + Math.sin(creature.phase * 10) * 0.3
-      else if (creature._fleeSprint > 0) target = 2.0 + Math.sin(creature.phase * 8) * 0.4
+      else if (creature._fleeSprint > 0) target = 1.0 + Math.sin(creature.phase * 20) * 0.6 + Math.sin(creature.phase * 31) * 0.3
+      else if (creature._scaredTimer > 0) target = 0.6 + Math.sin(creature.phase * 8) * 0.3
+      else if (creature._chaseDelayTimer > 0) target = 1.5 + Math.sin(creature.phase * 4) * 0.2
+      else if (creature._chasing) target = 2.2 + Math.sin(creature.phase * 6) * 0.4
       else if (creature.drinkingPotion) target = 1.6 + Math.sin(creature.phase * 4) * 0.3
       else if (creature.sleeping) target = 0.2 + Math.sin(creature.phase * 1.5) * 0.05
       else if (creature.eating) target = 1.5
@@ -249,7 +271,11 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
     }
     if (lightRef.current) {
       let target = creature.sleeping ? 1 : creature.eating ? 6 : creature.gathering ? 5 : creature.crafting ? 5 : 3
-      if (creature.inCombat) target = 8
+      if (creature._fleeSprint > 0) target = 2
+      else if (creature._scaredTimer > 0) target = 2
+      else if (creature._chaseDelayTimer > 0) target = 6
+      else if (creature._chasing) target = 10
+      else if (creature.inCombat) target = 8
       if (combatFlash.current > 0) target = 12
       if (levelUpGlow.current > 0) target = 15
       lightRef.current.intensity += (target - lightRef.current.intensity) * 4 * dt
@@ -260,7 +286,10 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
       const t = performance.now() * 0.002 + index * 2
       let glowScale = 1 + Math.sin(t) * 0.15
       if (creature.inCombat) glowScale = 1 + Math.sin(t * 5) * 0.25
-      else if (creature._fleeSprint > 0) glowScale = 1.3 + Math.sin(t * 6) * 0.2
+      else if (creature._fleeSprint > 0) glowScale = 0.85 + Math.sin(t * 10) * 0.15 + Math.sin(t * 17) * 0.08
+      else if (creature._scaredTimer > 0) glowScale = 0.9 + Math.sin(t * 6) * 0.1
+      else if (creature._chaseDelayTimer > 0) glowScale = 1.1 + Math.sin(t * 2) * 0.1
+      else if (creature._chasing) glowScale = 1.3 + Math.sin(t * 4) * 0.2
       if (levelUpGlow.current > 0) glowScale = 1.5 + Math.sin(t * 3) * 0.3
       glowRef.current.scale.setScalar(glowScale)
     }
@@ -605,6 +634,25 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
       floatLabel.current = ''
     }
 
+    // ── Direct floatingText from combat system (flee, chase, escape) ──
+    if (creature.floatingText) {
+      floatTimer.current = creature.floatingText.timer || 2.0
+      floatValue.current = 0
+      floatColor.current = creature.floatingText.color || '#ffffff'
+      floatLabel.current = creature.floatingText.text || ''
+      creature.floatingText = null
+    }
+
+    // ── Backup: tick _floatTextTimer (simple string approach) ──
+    if (creature._floatTextTimer > 0) {
+      creature._floatTextTimer -= dt
+      if (creature._floatTextTimer <= 0) {
+        creature._floatText = null
+        creature._floatTextColor = null
+        creature._floatTextTimer = 0
+      }
+    }
+
     if (floatTextRef.current) {
       if (floatTimer.current > 0) {
         floatTimer.current -= dt
@@ -670,6 +718,8 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
         hp: creature.hp, maxHp: creature.maxHp,
         state: creature.state, alive: creature.alive,
         detailLevel,
+        floatText: creature._floatText || null,
+        floatTextColor: creature._floatTextColor || null,
       })
     }
   })
@@ -789,6 +839,7 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
                   : display.state === 'crafting' ? '#ffcc44'
                   : display.state === 'seeking resource' ? '#888866'
                   : display.state === 'fighting' ? '#ff4444'
+                  : display.state === 'watching' ? '#ff8866'
                   : display.state === 'chasing' ? '#ff6644'
                   : display.state === 'fleeing' ? '#ff8844'
                   : display.state === 'scared' ? '#ff8844'
@@ -817,6 +868,19 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
                   width: `${hpPct}%`, height: '100%',
                   background: hpColor, borderRadius: '3px',
                 }} />
+              </div>
+            )}
+            {display.floatText && (
+              <div style={{
+                color: display.floatTextColor || '#44dd44',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                textAlign: 'center',
+                marginTop: '4px',
+                textShadow: `0 0 8px ${display.floatTextColor || '#44dd44'}, 0 0 4px rgba(0,0,0,0.9)`,
+                animation: 'none',
+              }}>
+                {display.floatText}
               </div>
             )}
           </div>

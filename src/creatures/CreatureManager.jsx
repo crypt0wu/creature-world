@@ -49,11 +49,13 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         combatKill: null, combatDeath: null,
         combatEngaged: null, combatFled: null, combatInterrupted: false,
         _combatDuration: 0, _combatTurns: 0,
-        _fleeAttempts: 0, _scaredTimer: 0, _scaredOfId: null, _fleeSprint: 0, _fleeFromX: 0, _fleeFromZ: 0,
+        _fleeAttempts: 0, _scaredTimer: 0, _scaredOfId: null, _fleeSprint: 0, _fleeFromX: 0, _fleeFromZ: 0, _fleeZigzag: 0, _pendingEscape: false,
+        _chaseDelayTimer: 0, _chaseDelayTarget: null, combatLetGo: null,
         _chasing: false, _chaseTargetId: null, _chaseTimer: 0, _chaseGoingForKill: false, _fleeMinDist: 0,
-        combatChaseStarted: null, combatChaseCaught: null, combatChaseEscaped: null, combatChaseGaveUp: null,
+        combatChaseStarted: null, combatChaseCaught: null, combatChaseEscaped: null, combatChaseGaveUp: null, combatEscaped: false,
         combatIntimidated: null, equipmentBroke: null, equipmentLow: null,
-        deathCause: null, killedBy: null, justLeveledUp: null,
+        deathCause: null, killedBy: null, justLeveledUp: null, floatingText: null,
+        _floatText: null, _floatTextColor: null, _floatTextTimer: 0,
         ...c,
       }))
     }
@@ -292,7 +294,7 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         c.combatFled = null
         logRef.current.unshift({
           time: worldClockRef.current,
-          msg: `${c.name} fled from battle with ${fled.opponentName}! (HP: ${fled.hp}/${fled.maxHp})`,
+          msg: `${c.name} fled from ${fled.opponentName}! (HP: ${Math.round(fled.hp)}/${Math.round(fled.maxHp)})`,
           species: c.species,
         })
         if (logRef.current.length > 50) logRef.current.pop()
@@ -307,46 +309,63 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         if (logRef.current.length > 50) logRef.current.pop()
         // Don't clear — Creature.jsx consumes for visuals
       }
-      // Chase event logging
-      if (c.combatChaseStarted) {
-        const chase = c.combatChaseStarted
-        c.combatChaseStarted = null
+      // Natural escape (flee timer expired, no chaser caught them)
+      if (c.combatEscaped) {
+        c.combatEscaped = false
         logRef.current.unshift({
           time: worldClockRef.current,
-          msg: `${c.name} is chasing ${chase.targetName}!`,
+          msg: `${c.name} escaped safely!`,
           species: c.species,
         })
         if (logRef.current.length > 50) logRef.current.pop()
       }
-      if (c.combatChaseCaught) {
-        const chase = c.combatChaseCaught
-        c.combatChaseCaught = null
+      // Chase event logging — log once, then mark as logged so we don't spam
+      // Creature.jsx reads the original flag for float text and nulls it
+      if (c.combatChaseStarted && !c.combatChaseStarted._logged) {
+        c.combatChaseStarted._logged = true
         logRef.current.unshift({
           time: worldClockRef.current,
-          msg: `${c.name} caught ${chase.targetName}! Combat resumes!`,
+          msg: `${c.name} is chasing ${c.combatChaseStarted.targetName}!`,
           species: c.species,
         })
         if (logRef.current.length > 50) logRef.current.pop()
       }
-      if (c.combatChaseEscaped) {
-        const chase = c.combatChaseEscaped
-        c.combatChaseEscaped = null
+      if (c.combatChaseCaught && !c.combatChaseCaught._logged) {
+        c.combatChaseCaught._logged = true
         logRef.current.unshift({
           time: worldClockRef.current,
-          msg: `${c.name} escaped from ${chase.chaserName}!`,
+          msg: `${c.name} caught up to ${c.combatChaseCaught.targetName}!`,
           species: c.species,
         })
         if (logRef.current.length > 50) logRef.current.pop()
       }
-      if (c.combatChaseGaveUp) {
-        const chase = c.combatChaseGaveUp
-        c.combatChaseGaveUp = null
+      if (c.combatChaseEscaped && !c.combatChaseEscaped._logged) {
+        c.combatChaseEscaped._logged = true
         logRef.current.unshift({
           time: worldClockRef.current,
-          msg: `${c.name} gave up chasing ${chase.targetName}`,
+          msg: `${c.name} escaped from ${c.combatChaseEscaped.chaserName}!`,
           species: c.species,
         })
         if (logRef.current.length > 50) logRef.current.pop()
+      }
+      if (c.combatChaseGaveUp && !c.combatChaseGaveUp._logged) {
+        c.combatChaseGaveUp._logged = true
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} gave up chasing ${c.combatChaseGaveUp.targetName}`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+      }
+      // Winner let prey go (no chase)
+      if (c.combatLetGo) {
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} let ${c.combatLetGo.targetName} go`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+        c.combatLetGo = null
       }
       // Equipment break logging
       if (c.equipmentBroke) {
@@ -473,13 +492,23 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         c.combatFled = null
         c.combatInterrupted = false
         c.combatIntimidated = null
+        c.combatLetGo = null
+        c._chaseDelayTimer = 0
+        c._chaseDelayTarget = null
         c.combatChaseStarted = null
         c.combatChaseCaught = null
         c.combatChaseEscaped = null
         c.combatChaseGaveUp = null
+        c.combatEscaped = false
+        c._pendingEscape = false
+        c.floatingText = null
+        c._floatText = null
+        c._floatTextColor = null
+        c._floatTextTimer = 0
         c.equipmentBroke = null
         c.equipmentLow = null
         c.justLeveledUp = null
+        c.floatingText = null
       }
     }
 

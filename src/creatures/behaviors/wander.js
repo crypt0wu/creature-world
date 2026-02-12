@@ -69,7 +69,9 @@ export function updateMovement(c, spec, dt) {
 
   const fleeBoost = c._fleeSprint > 0 ? 2.0 : 1.0
   const scaredBoost = (c._scaredTimer > 0 && c._fleeSprint <= 0) ? 1.3 : 1.0
-  const baseSpeed = c.spd * 0.4 * fleeBoost * scaredBoost
+  // Speed fluctuation during panic sprint — varies ±20%
+  const panicWobble = c._fleeSprint > 0 ? (0.8 + Math.sin(c.phase * 8) * 0.2 + Math.random() * 0.2) : 1.0
+  const baseSpeed = c.spd * 0.4 * fleeBoost * scaredBoost * panicWobble
 
   // Scared state: enforce minimum flee distance + keep running
   if (c._scaredTimer > 0 && !c.inCombat) {
@@ -82,6 +84,24 @@ export function updateMovement(c, spec, dt) {
     if (c._fleeSprint > 0 || !farEnough) {
       // Not safe yet — keep sprint alive if needed
       if (!farEnough && c._fleeSprint <= 0) c._fleeSprint = 2.0
+
+      // Erratic zigzag while sprinting in panic
+      if (c._fleeSprint > 0 && c.moving) {
+        c._fleeZigzag -= dt
+        if (c._fleeZigzag <= 0) {
+          c._fleeZigzag = 0.3 + Math.random() * 0.5
+          const fdx2 = c.x - (c._fleeFromX || 0)
+          const fdz2 = c.z - (c._fleeFromZ || 0)
+          const flen = Math.sqrt(fdx2 * fdx2 + fdz2 * fdz2) || 1
+          const perpX = -fdz2 / flen
+          const perpZ = fdx2 / flen
+          const jink = (Math.random() - 0.5) * 2 * (8 + Math.random() * 7)
+          c.targetX += perpX * jink
+          c.targetZ += perpZ * jink
+          c.targetX = Math.max(-WORLD_HALF, Math.min(WORLD_HALF, c.targetX))
+          c.targetZ = Math.max(-WORLD_HALF, Math.min(WORLD_HALF, c.targetZ))
+        }
+      }
 
       if (!c.moving) {
         const awayDist = Math.sqrt(fdx * fdx + fdz * fdz) || 1
@@ -203,7 +223,8 @@ export function updateMovement(c, spec, dt) {
     let dirZ = Math.cos(desiredAngle) + avoidZ * 0.5
     desiredAngle = Math.atan2(dirX, dirZ)
 
-    c.rotY = lerpAngle(c.rotY, desiredAngle, 2.5 * dt)
+    const turnRate = c._fleeSprint > 0 ? 6.0 : 2.5
+    c.rotY = lerpAngle(c.rotY, desiredAngle, turnRate * dt)
 
     if (dist < 3.0) {
       c.targetSpeed = baseSpeed * (dist / 3.0)

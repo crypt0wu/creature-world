@@ -97,7 +97,7 @@ final = max(1, round(base × type_bonus - armor_reduction))
 - Armor (defender): **4–6** per hit taken
 - Low durability warning: at **25%** remaining
 
-### Flee Thresholds (checked after each hit on defender)
+### Flee Thresholds (checked ONLY on the creature that just took damage)
 | Defender HP % | Flee Chance |
 |:-------------:|:-----------:|
 | > 60% | 0% |
@@ -105,18 +105,24 @@ final = max(1, round(base × type_bonus - armor_reduction))
 | 20–40% | 50% |
 | < 20% | 75% |
 
-No modifiers. No type advantage modifier. Just HP thresholds.
+Only the defender rolls for flee. The attacker never rolls on the same turn.
 
 ### Flee Execution
+- Only ONE creature flees (the loser). The winner stays put.
+- Flee direction: **exact opposite** from winner's position
 - Flee sprint duration: **12s** at **2x speed**
-- Scared timer: **30s** (blocks gathering/crafting)
-- Flee target: **35 units** away from opponent
+- Erratic zigzag: direction jink every **0.3–0.8s**, ±8–15 unit lateral offset
+- Speed fluctuation: **±20%** wobble during sprint
+- Scared timer: **30s** after fleeing (blocks gathering/crafting)
 - Min flee distance before stopping: **35 units**
 - Runner combat cooldown: **30s** (= scared time)
-- Winner combat cooldown: **15s** (half scared time)
 - Flee XP: **+5 XP** for runner
 
 ### Chase System
+- **3 second delay**: winner stands still for 3s before deciding (head start for prey)
+- During delay: prey sprints away building ~6 speed-units of distance
+- If chase NO: winner returns to normal immediately, cooldown **30s**
+
 | Condition | Chase Chance |
 |-----------|:-----------:|
 | Winner HP < 40% | **0% (never)** |
@@ -127,15 +133,15 @@ No modifiers. No type advantage modifier. Just HP thresholds.
 | Prey HP < 25% | **+30% bonus** (going for kill) |
 | Prey HP < 35% | **+15% bonus** |
 
-- Chase duration: **8s** max
+- Chase duration: **8s** max (after the 3s delay)
 - Chase speed: **1.5x** normal movement speed (`spd * 0.4 * 1.5`)
 - Catch distance: **< 3 units**
-- Head start: **1s** before catch check activates
 - On catch: combat resumes, prey flee state cleared
+- Energy drain during chase: **0.3/s**, gives up at energy ≤ 5
 
-### Mutual Disengage (hit limit)
-- Both get scared timer: **15s**
-- Both walk **15 units** apart
+### Mutual Disengage (hit limit = draw)
+- No fleeing — both walk **15 units** apart
+- Both get combat cooldown: **60s**
 - Both get **+5 XP**
 
 ### Kill Rewards
@@ -310,6 +316,9 @@ Wooden Shield lasts: ~7–10 hits taken
 |-------|:------:|
 | Flee sprint duration | **12s** |
 | Flee sprint speed | **2x normal** (`spd × 0.4 × 2.0`) |
+| Flee direction | **exact opposite** from winner |
+| Flee zigzag interval | **0.3–0.8s** per jink |
+| Flee speed wobble | **±20%** fluctuation |
 | Scared timer | **30s** |
 | Scared speed boost (after sprint) | **1.3x normal** |
 | Min flee distance before stopping | **35 units** |
@@ -317,11 +326,12 @@ Wooden Shield lasts: ~7–10 hits taken
 | Boundary redirect margin | **10 units** from edge |
 | Scared proximity re-flee | within **20 units** of threat → sprint **2s** more |
 | Runner combat cooldown | **30s** |
-| Winner combat cooldown | **15s** |
-| Chase duration | **8s** max |
+| Winner combat cooldown | **30s** (if no chase), **60s** (after chase) |
+| Chase delay (head start) | **3s** (winner stands still) |
+| Chase duration | **8s** max (after delay) |
 | Chase speed | **1.5x normal** (`spd × 0.4 × 1.5`) |
 | Chase catch distance | **< 3 units** |
-| Chase head start | **1s** (no catch check during first second) |
+| Chase energy drain | **0.3/s**, gives up at ≤ 5 |
 | Post-chase combat cooldown | **60s** |
 | World bounds | **±95 units** (190×190 map) |
 | World edge avoidance zone | **15 units** from edge |

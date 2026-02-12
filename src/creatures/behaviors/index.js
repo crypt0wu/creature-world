@@ -24,8 +24,8 @@ export function updateCreature(c, allCreatures, spec, dt, foods, resourceStates,
     autoUsePotion(c, dt)
   }
 
-  // Skip hunger/gathering/crafting/wander during active combat or chase
-  if (!c.inCombat && !c._chasing) {
+  // Skip hunger/gathering/crafting/wander during active combat, chase, or chase delay
+  if (!c.inCombat && !c._chasing && !(c._chaseDelayTimer > 0)) {
     const isScared = c._scaredTimer > 0
 
     // Hunger runs always, but hunger.js self-gates during scared state
@@ -46,6 +46,7 @@ export function updateCreature(c, allCreatures, spec, dt, foods, resourceStates,
   // State determination (if still alive after updates)
   if (c.alive) {
     if (c.inCombat) c.state = 'fighting'
+    else if (c._chaseDelayTimer > 0) c.state = 'watching'
     else if (c._chasing) c.state = 'chasing'
     else if (c._fleeSprint > 0) c.state = 'fleeing'
     else if (c._scaredTimer > 0) c.state = 'scared'

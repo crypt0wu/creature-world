@@ -49,18 +49,64 @@ function generateThinkingText(c) {
   const herbCount = counts.herb || 0
   const invFull = inv.length >= MAX_INVENTORY
 
+  // Winner standing still, watching prey flee, deciding
+  if (c._chaseDelayTimer > 0) {
+    const watchTexts = [
+      "They're running... should I chase?",
+      "Hmm... they're getting away. Do I follow?",
+      "Watching them flee... deciding my next move.",
+      "They look weak. Maybe I should finish this.",
+    ]
+    return watchTexts[Math.floor(c.phase * 10) % watchTexts.length]
+  }
+
   if (c._chasing) {
-    if (c._chaseGoingForKill) return "Enemy is weak — finishing them off"
-    return "They're running! I can catch them if I'm fast enough..."
+    if (c._chaseGoingForKill) {
+      const killTexts = [
+        "They're weak — finishing them off!",
+        "Almost got them... one more hit should do it.",
+        "No escape now. I'm faster and stronger.",
+        "Going in for the kill!",
+      ]
+      return killTexts[Math.floor(c.phase * 10) % killTexts.length]
+    }
+    const chaseTexts = [
+      "Get back here! I'm not done with you!",
+      "They're running! I can catch them if I'm fast enough...",
+      "The hunt is on! They can't outrun me forever.",
+      "Don't let them get away!",
+    ]
+    return chaseTexts[Math.floor(c.phase * 10) % chaseTexts.length]
   }
 
   if (c._fleeSprint > 0) {
-    return "Running for my life! Need to get far away before they catch up."
+    const panicTexts = [
+      "RUN RUN RUN! Don't look back!",
+      "They're right behind me! Need to go FASTER!",
+      "My heart is pounding — can't stop now!",
+      "Just keep running... just keep running...",
+      "NO NO NO! Get away from me!",
+      "Which way?! Any way — just GO!",
+    ]
+    return panicTexts[Math.floor(c.phase * 10) % panicTexts.length]
   }
 
   if (c._scaredTimer > 0) {
-    if (hpPct < 0.3) return "Badly hurt and terrified. Need to get far away and find healing..."
-    return "Not safe here... need to keep moving. Can't stop until I'm sure they're gone."
+    if (hpPct < 0.3) {
+      const hurtTexts = [
+        "Badly hurt... need to hide and heal...",
+        "Everything hurts. Can't let them find me again.",
+        "So much blood... need herbs, need rest...",
+      ]
+      return hurtTexts[Math.floor(c.phase * 10) % hurtTexts.length]
+    }
+    const scaredTexts = [
+      "Is it safe? I think they stopped following...",
+      "Can't stop shaking... need to keep moving.",
+      "Not safe here... need to keep distance.",
+      "Still terrified. Can't gather or craft until I calm down.",
+    ]
+    return scaredTexts[Math.floor(c.phase * 10) % scaredTexts.length]
   }
 
   if (c.drinkingPotion) {
@@ -706,6 +752,7 @@ export default function CreatureUI({
                     textAlign: 'right',
                     color: isDead ? '#ff4444'
                       : c.state === 'fighting' ? '#ff4444'
+                      : c.state === 'watching' ? '#ff8866'
                       : c.state === 'chasing' ? '#ff6644'
                       : c.state === 'fleeing' ? '#ff8844'
                       : c.state === 'scared' ? '#ff8844'

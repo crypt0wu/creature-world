@@ -157,7 +157,14 @@ export function createCreature(speciesName, index, placedPositions) {
     _fleeSprint: 0,
     _fleeFromX: 0,
     _fleeFromZ: 0,
+    _fleeZigzag: 0,
+    _pendingEscape: false,
+    combatEscaped: false,
     combatIntimidated: null,
+    // Chase delay (winner stands still deciding)
+    _chaseDelayTimer: 0,
+    _chaseDelayTarget: null,
+    combatLetGo: null,
     // Chase (pursuer)
     _chasing: false,
     _chaseTargetId: null,
@@ -175,6 +182,11 @@ export function createCreature(speciesName, index, placedPositions) {
     equipmentLow: null,
     // Leveling
     justLeveledUp: null,
+    // Direct float text from combat
+    floatingText: null,
+    _floatText: null,
+    _floatTextColor: null,
+    _floatTextTimer: 0,
   }
 }
 
