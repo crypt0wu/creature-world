@@ -237,37 +237,39 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
     }
 
     // ── Emissive / light ──
-    if (coreRef.current?.material) {
-      let target = 0.8
-      if (creature.inCombat) target = 1.8 + Math.sin(creature.phase * 12) * 0.5
-      else if (creature._fleeSprint > 0) target = 1.0 + Math.sin(creature.phase * 20) * 0.6 + Math.sin(creature.phase * 31) * 0.3
-      else if (creature._scaredTimer > 0) target = 0.6 + Math.sin(creature.phase * 8) * 0.3
-      else if (creature._chaseDelayTimer > 0) target = 1.5 + Math.sin(creature.phase * 4) * 0.2
-      else if (creature._chasing) target = 2.2 + Math.sin(creature.phase * 6) * 0.4
-      else if (creature.drinkingPotion) target = 1.6 + Math.sin(creature.phase * 4) * 0.3
-      else if (creature.sleeping) target = 0.2 + Math.sin(creature.phase * 1.5) * 0.05
-      else if (creature.eating) target = 1.5
-      else if (creature.gathering) target = 1.2
-      else if (creature.crafting) target = 1.4 + Math.sin(creature.phase * 3) * 0.3
+    {
+      let emTarget = 0.8
+      if (creature.inCombat) emTarget = 1.8 + Math.sin(creature.phase * 12) * 0.5
+      else if (creature._fleeSprint > 0) emTarget = 1.0 + Math.sin(creature.phase * 20) * 0.6 + Math.sin(creature.phase * 31) * 0.3
+      else if (creature._scaredTimer > 0) emTarget = 0.6 + Math.sin(creature.phase * 8) * 0.3
+      else if (creature._chaseDelayTimer > 0) emTarget = 1.5 + Math.sin(creature.phase * 4) * 0.2
+      else if (creature._chasing) emTarget = 2.2 + Math.sin(creature.phase * 6) * 0.4
+      else if (creature.drinkingPotion) emTarget = 1.6 + Math.sin(creature.phase * 4) * 0.3
+      else if (creature.sleeping) emTarget = 0.2 + Math.sin(creature.phase * 1.5) * 0.05
+      else if (creature.eating) emTarget = 1.5
+      else if (creature.gathering) emTarget = 1.2
+      else if (creature.crafting) emTarget = 1.4 + Math.sin(creature.phase * 3) * 0.3
 
       // Crystal flash override
       if (crystalFlash.current > 0) {
-        target = 3.0
+        emTarget = 3.0
         crystalFlash.current -= dt
       }
       // Combat hit flash
       if (combatFlash.current > 0) {
-        target = 4.0
+        emTarget = 4.0
         combatFlash.current -= dt
       }
       // Level-up glow
       if (levelUpGlow.current > 0) {
-        target = 5.0
+        emTarget = 5.0
         levelUpGlow.current -= dt
       }
 
-      const cur = coreRef.current.material.emissiveIntensity
-      coreRef.current.material.emissiveIntensity = cur + (target - cur) * 4 * dt
+      if (coreRef.current?.material) {
+        const cur = coreRef.current.material.emissiveIntensity
+        coreRef.current.material.emissiveIntensity = cur + (emTarget - cur) * 4 * dt
+      }
     }
     if (lightRef.current) {
       let target = creature.sleeping ? 1 : creature.eating ? 6 : creature.gathering ? 5 : creature.crafting ? 5 : 3
@@ -739,7 +741,7 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
       onPointerOver={display.alive ? (e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; setHover(`${c.name} (${c.species})`) } : undefined}
       onPointerOut={display.alive ? () => { document.body.style.cursor = 'auto'; clearHover() } : undefined}
     >
-      {/* Core sphere */}
+      {/* Core body */}
       <mesh ref={coreRef} castShadow>
         <sphereGeometry args={[0.7, 16, 16]} />
         <meshStandardMaterial
