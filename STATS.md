@@ -110,12 +110,12 @@ Only the defender rolls for flee. The attacker never rolls on the same turn.
 ### Flee Execution
 - Only ONE creature flees (the loser). The winner stays put.
 - Flee direction: **exact opposite** from winner's position
-- Flee sprint duration: **12s** at **2x speed**
+- Flee sprint duration: **10–12s** at **2x speed**
 - Erratic zigzag: direction jink every **0.3–0.8s**, ±8–15 unit lateral offset
 - Speed fluctuation: **±20%** wobble during sprint
-- Scared timer: **30s** after fleeing (blocks gathering/crafting)
+- Scared timer: **7–30s** after fleeing (randomized, blocks gathering/crafting)
 - Min flee distance before stopping: **35 units**
-- Runner combat cooldown: **30s** (= scared time)
+- Runner combat cooldown: **7–30s** (= scared time)
 - Flee XP: **+5 XP** for runner
 
 ### Chase System
@@ -314,18 +314,18 @@ Wooden Shield lasts: ~7–10 hits taken
 
 | Value | Amount |
 |-------|:------:|
-| Flee sprint duration | **12s** |
+| Flee sprint duration | **10–12s** (randomized) |
 | Flee sprint speed | **2x normal** (`spd × 0.4 × 2.0`) |
 | Flee direction | **exact opposite** from winner |
 | Flee zigzag interval | **0.3–0.8s** per jink |
 | Flee speed wobble | **±20%** fluctuation |
-| Scared timer | **30s** |
+| Scared timer | **7–30s** (randomized) |
 | Scared speed boost (after sprint) | **1.3x normal** |
 | Min flee distance before stopping | **35 units** |
 | Flee target distance | **35 units** from opponent |
 | Boundary redirect margin | **10 units** from edge |
 | Scared proximity re-flee | within **20 units** of threat → sprint **2s** more |
-| Runner combat cooldown | **30s** |
+| Runner combat cooldown | **7–30s** (= scared time) |
 | Winner combat cooldown | **30s** (if no chase), **60s** (after chase) |
 | Chase delay (head start) | **3s** (winner stands still) |
 | Chase duration | **8s** max (after delay) |

@@ -55,7 +55,6 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         combatChaseStarted: null, combatChaseCaught: null, combatChaseEscaped: null, combatChaseGaveUp: null, combatEscaped: false,
         combatIntimidated: null, equipmentBroke: null, equipmentLow: null,
         deathCause: null, killedBy: null, justLeveledUp: null, floatingText: null,
-        _floatText: null, _floatTextColor: null, _floatTextTimer: 0,
         ...c,
       }))
     }
@@ -505,13 +504,9 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         // gameplay flag, not a visual flag. Clearing it prevents
         // the ESCAPED! event from firing when flee sprint expires.
         c.floatingText = null
-        c._floatText = null
-        c._floatTextColor = null
-        c._floatTextTimer = 0
         c.equipmentBroke = null
         c.equipmentLow = null
         c.justLeveledUp = null
-        c.floatingText = null
       }
     }
 

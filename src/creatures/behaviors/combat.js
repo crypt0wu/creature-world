@@ -252,8 +252,9 @@ function evaluateChase(winner, runner) {
   winner._chaseGoingForKill = goingForKill
   winner._combatCooldown = 0
 
-  // Event flag — Creature.jsx handles float text via combatChaseStarted
+  // Event flag for CreatureManager log
   winner.combatChaseStarted = { targetName: runner.name, goingForKill }
+  winner.floatingText = { text: goingForKill ? 'Going for the kill!' : 'Chasing!', color: goingForKill ? '#ff2222' : '#ff4444', timer: 1.5 }
 
   winner.targetX = runner.x
   winner.targetZ = runner.z
@@ -269,10 +270,11 @@ function evaluateChase(winner, runner) {
 function triggerEscaped(prey, fromName) {
   prey._pendingEscape = false
   prey.combatEscaped = true
-  // Ensure combatChaseEscaped is set so Creature.jsx shows "Escaped!" float
+  // Event flag for CreatureManager log
   if (!prey.combatChaseEscaped) {
     prey.combatChaseEscaped = { chaserName: fromName }
   }
+  prey.floatingText = { text: 'Escaped!', color: '#44ff88', timer: 1.5 }
 
   // Stop sprinting — safe now
   prey._fleeSprint = 0
@@ -316,8 +318,10 @@ export function updateCombat(c, allCreatures, spec, dt) {
       c._fleeZigzag = 0
       c._panicTextTimer = 0
       c.combatEscaped = true
-      // Creature.jsx handles float text via combatChaseEscaped
-      c.combatChaseEscaped = { chaserName: 'unknown' }
+      // Look up chaser name from _scaredOfId
+      const chaser = c._scaredOfId != null ? allCreatures.find(t => t.id === c._scaredOfId) : null
+      c.combatChaseEscaped = { chaserName: chaser?.name || 'unknown' }
+      c.floatingText = { text: 'Escaped!', color: '#44ff88', timer: 1.5 }
       // Fresh scared timer from now
       const scaredDuration = SCARED_TIME_MIN + Math.random() * (SCARED_TIME_MAX - SCARED_TIME_MIN)
       c._scaredTimer = scaredDuration
@@ -334,9 +338,7 @@ export function updateCombat(c, allCreatures, spec, dt) {
     if (c._panicTextTimer <= 0) {
       c._panicTextTimer = 1.5 + Math.random() * 1.5  // cycle every 1.5–3s
       const msg = PANIC_TEXTS[Math.floor(Math.random() * PANIC_TEXTS.length)]
-      c._floatText = msg
-      c._floatTextColor = '#ffaa33'
-      c._floatTextTimer = 1.5
+      c.floatingText = { text: msg, color: '#ffaa33', timer: 1.5 }
     }
   }
 
@@ -411,7 +413,7 @@ export function updateCombat(c, allCreatures, spec, dt) {
     if (!prey || c._chaseTimer <= 0) {
       console.log(`[CHASE] ${c.name} gives up the chase`)
       c.combatChaseGaveUp = { targetName: prey?.name || 'unknown' }
-      // Float text handled by Creature.jsx via combatChaseGaveUp flag
+      c.floatingText = { text: 'Gave up chase', color: '#ffaa44', timer: 1.5 }
       if (prey) {
         prey.combatChaseEscaped = { chaserName: c.name }
         triggerEscaped(prey, c.name)
@@ -427,9 +429,9 @@ export function updateCombat(c, allCreatures, spec, dt) {
     if (dist < CATCH_DIST) {
       console.log(`[CHASE] ${c.name} CATCHES ${prey.name}! (dist: ${dist.toFixed(1)})`)
 
-      // Event flag — Creature.jsx handles chaser float via combatChaseCaught
+      // Event flag for CreatureManager log
       c.combatChaseCaught = { targetName: prey.name }
-      // Prey has no flag handler — use floatingText directly
+      c.floatingText = { text: 'Caught!', color: '#ff2222', timer: 1.8 }
       prey.floatingText = { text: 'CAUGHT!', color: '#ff2222', timer: 2.0 }
 
       // End chase + clear prey flee state completely
@@ -468,7 +470,7 @@ export function updateCombat(c, allCreatures, spec, dt) {
     if (c.energy <= 5) {
       console.log(`[CHASE] ${c.name} exhausted, gives up`)
       c.combatChaseGaveUp = { targetName: prey.name, exhausted: true }
-      // Float text handled by Creature.jsx via combatChaseGaveUp flag
+      c.floatingText = { text: 'Exhausted!', color: '#ffaa44', timer: 1.5 }
       prey.combatChaseEscaped = { chaserName: c.name }
       triggerEscaped(prey, c.name)
       endChase(c)

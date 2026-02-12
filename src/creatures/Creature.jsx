@@ -584,38 +584,11 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
       floatLabel.current = 'Backed away!'
     }
 
-    // ── Chase events ──
-    if (creature.combatChaseStarted) {
-      const gfk = creature.combatChaseStarted.goingForKill
-      creature.combatChaseStarted = null
-      floatTimer.current = 1.5
-      floatValue.current = 0
-      floatColor.current = gfk ? '#ff2222' : '#ff4444'
-      floatLabel.current = gfk ? 'Going for the kill!' : 'Chasing!'
-    }
-    if (creature.combatChaseCaught) {
-      creature.combatChaseCaught = null
-      floatTimer.current = 1.8
-      floatValue.current = 0
-      floatColor.current = '#ff2222'
-      floatLabel.current = 'Caught!'
-      combatFlash.current = 0.3
-    }
-    if (creature.combatChaseEscaped) {
-      creature.combatChaseEscaped = null
-      floatTimer.current = 1.5
-      floatValue.current = 0
-      floatColor.current = '#44ff88'
-      floatLabel.current = 'Escaped!'
-    }
-    if (creature.combatChaseGaveUp) {
-      const exhausted = creature.combatChaseGaveUp.exhausted
-      creature.combatChaseGaveUp = null
-      floatTimer.current = 1.5
-      floatValue.current = 0
-      floatColor.current = '#ffaa44'
-      floatLabel.current = exhausted ? 'Exhausted!' : 'Gave up chase'
-    }
+    // ── Clean up combat event flags (CreatureManager logs these; float text now set directly by combat.js) ──
+    if (creature.combatChaseStarted) creature.combatChaseStarted = null
+    if (creature.combatChaseCaught) { combatFlash.current = 0.3; creature.combatChaseCaught = null }
+    if (creature.combatChaseEscaped) creature.combatChaseEscaped = null
+    if (creature.combatChaseGaveUp) creature.combatChaseGaveUp = null
 
     // ── Detect inventory pickup (berry only — gathering has its own text) ──
     const invLen = creature.inventory?.length || 0
@@ -644,16 +617,6 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
       floatColor.current = creature.floatingText.color || '#ffffff'
       floatLabel.current = creature.floatingText.text || ''
       creature.floatingText = null
-    }
-
-    // ── Backup: tick _floatTextTimer (simple string approach) ──
-    if (creature._floatTextTimer > 0) {
-      creature._floatTextTimer -= dt
-      if (creature._floatTextTimer <= 0) {
-        creature._floatText = null
-        creature._floatTextColor = null
-        creature._floatTextTimer = 0
-      }
     }
 
     if (floatTextRef.current) {
@@ -721,8 +684,6 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
         hp: creature.hp, maxHp: creature.maxHp,
         state: creature.state, alive: creature.alive,
         detailLevel,
-        floatText: creature._floatText || null,
-        floatTextColor: creature._floatTextColor || null,
       })
     }
   })
@@ -871,19 +832,6 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
                   width: `${hpPct}%`, height: '100%',
                   background: hpColor, borderRadius: '3px',
                 }} />
-              </div>
-            )}
-            {display.floatText && (
-              <div style={{
-                color: display.floatTextColor || '#44dd44',
-                fontSize: '14px',
-                fontWeight: 'bold',
-                textAlign: 'center',
-                marginTop: '4px',
-                textShadow: `0 0 8px ${display.floatTextColor || '#44dd44'}, 0 0 4px rgba(0,0,0,0.9)`,
-                animation: 'none',
-              }}>
-                {display.floatText}
               </div>
             )}
           </div>

@@ -184,9 +184,6 @@ export function createCreature(speciesName, index, placedPositions) {
     justLeveledUp: null,
     // Direct float text from combat
     floatingText: null,
-    _floatText: null,
-    _floatTextColor: null,
-    _floatTextTimer: 0,
   }
 }
 
