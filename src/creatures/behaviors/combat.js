@@ -140,18 +140,36 @@ function evaluateChase(winner, runner, allCreatures) {
   if (p === 'fierce' || p === 'bold') chance = 0.70
   else if (p === 'sneaky') chance = 0.50
 
+  // Low HP prey — smell blood
+  const preyPct = runner.hp / runner.maxHp
+  let goingForKill = false
+  if (preyPct < 0.15) {
+    chance = 0.90  // override — almost dead, everyone chases
+    goingForKill = true
+  } else if (preyPct < 0.25) {
+    chance = Math.min(chance + 0.30, 0.95)
+    goingForKill = true
+  } else if (preyPct < 0.35) {
+    chance += 0.15
+  }
+
   const roll = Math.random()
-  console.log(`[CHASE] ${winner.name} (${p}) chase roll: ${Math.round(roll * 100)} vs ${Math.round(chance * 100)}% → ${roll < chance ? 'CHASE!' : 'no chase'}`)
+  console.log(`[CHASE] ${winner.name} (${p}) chase roll: ${Math.round(roll * 100)} vs ${Math.round(chance * 100)}%${goingForKill ? ' (BLOOD!)' : ''} → ${roll < chance ? 'CHASE!' : 'no chase'}`)
 
   if (roll >= chance) return
 
   // START CHASE
-  console.log(`CHASE TRIGGERED: ${winner.name} chasing ${runner.name}!`)
+  if (goingForKill) {
+    console.log(`${winner.name} is going for the kill on ${runner.name}!`)
+  } else {
+    console.log(`CHASE TRIGGERED: ${winner.name} chasing ${runner.name}!`)
+  }
   winner._chasing = true
   winner._chaseTargetId = runner.id
   winner._chaseTimer = CHASE_DURATION
+  winner._chaseGoingForKill = goingForKill
   winner._combatCooldown = 0
-  winner.combatChaseStarted = { targetName: runner.name }
+  winner.combatChaseStarted = { targetName: runner.name, goingForKill }
   winner.targetX = runner.x
   winner.targetZ = runner.z
   winner.moving = true
@@ -162,6 +180,7 @@ function _endChase(c) {
   c._chasing = false
   c._chaseTargetId = null
   c._chaseTimer = 0
+  c._chaseGoingForKill = false
   c._combatCooldown = COMBAT_COOLDOWN
 }
 

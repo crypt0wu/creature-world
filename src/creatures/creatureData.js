@@ -162,6 +162,7 @@ export function createCreature(speciesName, index, placedPositions) {
     _chasing: false,
     _chaseTargetId: null,
     _chaseTimer: 0,
+    _chaseGoingForKill: false,
     // Flee distance enforcement (runner)
     _fleeMinDist: 0,
     // Chase event flags

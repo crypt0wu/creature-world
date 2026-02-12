@@ -555,11 +555,12 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
 
     // ── Chase events ──
     if (creature.combatChaseStarted) {
+      const gfk = creature.combatChaseStarted.goingForKill
       creature.combatChaseStarted = null
       floatTimer.current = 1.5
       floatValue.current = 0
-      floatColor.current = '#ff4444'
-      floatLabel.current = 'Chasing!'
+      floatColor.current = gfk ? '#ff2222' : '#ff4444'
+      floatLabel.current = gfk ? 'Going for the kill!' : 'Chasing!'
     }
     if (creature.combatChaseCaught) {
       creature.combatChaseCaught = null

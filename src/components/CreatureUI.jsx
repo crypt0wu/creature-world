@@ -50,6 +50,7 @@ function generateThinkingText(c) {
   const invFull = inv.length >= MAX_INVENTORY
 
   if (c._chasing) {
+    if (c._chaseGoingForKill) return "Enemy is weak — finishing them off"
     return "They're running! I can catch them if I'm fast enough..."
   }
 
