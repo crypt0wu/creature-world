@@ -61,6 +61,12 @@ export function updateMovement(c, spec, dt) {
     return
   }
 
+  // Building — stop all movement
+  if (c._buildingType) {
+    c.currentSpeed = Math.max(0, c.currentSpeed - 3.0 * dt)
+    return
+  }
+
   // Drinking potion — stop all movement
   if (c.drinkingPotion) {
     c.currentSpeed = Math.max(0, c.currentSpeed - 3.0 * dt)
@@ -141,6 +147,12 @@ export function updateMovement(c, spec, dt) {
 
     // If seeking resource, gathering.js drives movement — just decel and wait
     if (c.seekingResource) {
+      c.currentSpeed = Math.max(0, c.currentSpeed - 2.0 * dt)
+      return
+    }
+
+    // Returning home to sleep or build — energy.js drives movement target
+    if (c._returningHome || c._returningToBuild) {
       c.currentSpeed = Math.max(0, c.currentSpeed - 2.0 * dt)
       return
     }
@@ -247,7 +259,7 @@ export function updateMovement(c, spec, dt) {
       const fx = c.x - (c._fleeFromX || 0), fz = c.z - (c._fleeFromZ || 0)
       return Math.sqrt(fx * fx + fz * fz) >= c._fleeMinDist
     })()
-    if (dist < 1.5 && c.currentSpeed < 0.3 && !c.seekingFood && !c.seekingResource && fleeDistOk) {
+    if (dist < 1.5 && c.currentSpeed < 0.3 && !c.seekingFood && !c.seekingResource && !c._returningHome && !c._returningToBuild && fleeDistOk) {
       c.moving = false
       c.pause = spec.pauseMin + Math.random() * (spec.pauseMax - spec.pauseMin)
     }

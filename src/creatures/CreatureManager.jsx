@@ -1,16 +1,17 @@
 import { useRef, useMemo, useEffect, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { getTerrainHeight } from '../components/Terrain'
-import { WORLD_ITEMS, OBSTACLES, findValidResourcePosition } from '../worldData'
+import { WORLD_ITEMS, OBSTACLES, findValidResourcePosition, setActiveVillages } from '../worldData'
 import SPECIES from './species'
 import { createAllCreatures, createCreature } from './creatureData'
 import { loadCreatures, loadWorldClock, saveCreatures, saveWorldClock, loadResourceStates, saveResourceStates, loadSpeciesMemory, saveSpeciesMemory } from './creatureStore'
 import { updateCreature, createFoodSources, updateFoodSources } from './behaviors'
 import { scoreItem, recordDeath } from './scoring'
-import { MAX_INVENTORY } from './inventory'
+import { trackGather, getMaxInventory } from './village'
 import Creature from './Creature'
 import FoodSources from '../components/FoodSources'
 import DroppedItems from '../components/DroppedItems'
+import VillageRenderer from './VillageRenderer'
 
 const GATHER_VERBS = { tree: 'chopping a tree', rock: 'mining a rock', bush: 'picking herbs' }
 const ITEM_LABELS = { wood: 'Wood', stone: 'Stone', herb: 'Herb', crystal: 'Crystal', berry: 'Berry' }
@@ -22,7 +23,7 @@ function createDefaultResourceStates() {
   }))
 }
 
-export default function CreatureManager({ controlsRef, selectedId, followingId, onSelect, onSync, resourceStatesRef, speedRef, debugRef, debugOpen, showAllThinking }) {
+export default function CreatureManager({ controlsRef, selectedId, followingId, onSelect, onSelectStorage, onSync, resourceStatesRef, speedRef, debugRef, debugOpen, showAllThinking }) {
   const initialData = useMemo(() => {
     const loaded = loadCreatures()
     if (loaded && loaded.length > 0) {
@@ -55,8 +56,24 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         combatChaseStarted: null, combatChaseCaught: null, combatChaseEscaped: null, combatChaseGaveUp: null, combatEscaped: false,
         combatIntimidated: null, equipmentBroke: null, equipmentLow: null,
         deathCause: null, killedBy: null, justLeveledUp: null, floatingText: null,
+        village: null, _totalGathered: 0, villageClaimed: false, _returningHome: false, _returningToBuild: false,
+        _buildingType: null, _buildingTimer: 0, _buildingDuration: 0, buildingComplete: null,
+        _buildingPos: null,
         ...c,
       }))
+      // Ensure saved villages have buildings array (added in Step 3)
+      .map(c => {
+        if (c.village && !c.village.buildings) c.village.buildings = []
+        // Ensure storage buildings have items array
+        if (c.village && c.village.buildings) {
+          for (let i = 0; i < c.village.buildings.length; i++) {
+            if (c.village.buildings[i].type === 'storage' && !c.village.buildings[i].items) {
+              c.village.buildings[i].items = []
+            }
+          }
+        }
+        return c
+      })
     }
     return createAllCreatures()
   }, [])
@@ -120,6 +137,15 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
     // Update food respawn timers
     updateFoodSources(foods, dt)
 
+    // Sync active village positions for resource spawn exclusion
+    const villages = []
+    for (let i = 0; i < creatures.length; i++) {
+      if (creatures[i].alive && creatures[i].village) {
+        villages.push({ x: creatures[i].village.x, z: creatures[i].village.z })
+      }
+    }
+    setActiveVillages(villages)
+
     // Tick resource regrow timers
     for (let i = 0; i < resourceStates.length; i++) {
       const rs = resourceStates[i]
@@ -157,7 +183,7 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         c.pickedUpBerry = false
         logRef.current.unshift({
           time: worldClockRef.current,
-          msg: `${c.name} found an extra berry! (inventory: ${c.inventory.length}/${MAX_INVENTORY})`,
+          msg: `${c.name} found an extra berry! (inventory: ${c.inventory.length}/${getMaxInventory(c)})`,
           species: c.species,
         })
         if (logRef.current.length > 50) logRef.current.pop()
@@ -437,33 +463,57 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         if (logRef.current.length > 50) logRef.current.pop()
       }
 
-      if (c.alive && c.state !== prevState) {
-        let msg
-        if (c.state === 'sleeping') {
-          msg = `${c.name} fell asleep`
-        } else if (prevState === 'sleeping') {
-          msg = `${c.name} woke up (energy: ${Math.round(c.energy)})`
-        } else if (prevState === 'eating' && c.state !== 'eating') {
-          msg = `${c.name} finished eating (+${c.lastHungerGain} hunger)`
-        } else if (c.state === 'crafting' && c.craftRecipe) {
-          msg = `${c.name} started crafting ${c.craftRecipe.label}`
-        } else if (c.state === 'gathering') {
-          const verb = GATHER_VERBS[c.targetResourceType] || 'gathering'
-          msg = `${c.name} is ${verb}`
-        } else if (c.state === 'fighting') {
-          const target = creatures.find(t => t.id === c._combatTarget)
-          msg = target ? `${c.name} is fighting ${target.name}!` : `${c.name} is fighting!`
-        } else if (c.state === 'seeking resource' && c._gatherGoal?.reason) {
-          msg = `${c.name}: ${c._gatherGoal.reason}`
-        } else {
-          msg = `${c.name} is ${c.state}`
-        }
+      // Village claiming log
+      if (c.villageClaimed) {
+        c.villageClaimed = false
         logRef.current.unshift({
           time: worldClockRef.current,
-          msg,
+          msg: `${c.name} claimed a home base!`,
           species: c.species,
         })
         if (logRef.current.length > 50) logRef.current.pop()
+      }
+
+      // Building complete log
+      if (c.buildingComplete) {
+        logRef.current.unshift({
+          time: worldClockRef.current,
+          msg: `${c.name} built a ${c.buildingComplete.label}!`,
+          species: c.species,
+        })
+        if (logRef.current.length > 50) logRef.current.pop()
+        // Don't clear — Creature.jsx consumes for visuals
+      }
+
+      if (c.alive && c.state !== prevState) {
+        {
+          let msg
+          if (c.state === 'sleeping') {
+            msg = `${c.name} fell asleep`
+          } else if (prevState === 'sleeping') {
+            msg = `${c.name} woke up (energy: ${Math.round(c.energy)})`
+          } else if (prevState === 'eating' && c.state !== 'eating') {
+            msg = `${c.name} finished eating (+${c.lastHungerGain} hunger)`
+          } else if (c.state === 'crafting' && c.craftRecipe) {
+            msg = `${c.name} started crafting ${c.craftRecipe.label}`
+          } else if (c.state === 'gathering') {
+            const verb = GATHER_VERBS[c.targetResourceType] || 'gathering'
+            msg = `${c.name} is ${verb}`
+          } else if (c.state === 'fighting') {
+            const target = creatures.find(t => t.id === c._combatTarget)
+            msg = target ? `${c.name} is fighting ${target.name}!` : `${c.name} is fighting!`
+          } else if (c.state === 'seeking resource' && c._gatherGoal?.reason) {
+            msg = `${c.name}: ${c._gatherGoal.reason}`
+          } else {
+            msg = `${c.name} is ${c.state}`
+          }
+          logRef.current.unshift({
+            time: worldClockRef.current,
+            msg,
+            species: c.species,
+          })
+          if (logRef.current.length > 50) logRef.current.pop()
+        }
       }
       if (!c.alive && wasAlive && !diedInCombat) {
         // Non-combat death (starvation etc) — combat deaths are logged separately
@@ -473,6 +523,20 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
           msg: `${c.name} has died!`,
           species: c.species,
         })
+      }
+
+      // Safety net: start destroy animation on any dead creature with a village
+      if (!c.alive && c.village && !c.village.destroying) {
+        console.log(`[VILLAGE] ${c.name} died, village destroying`)
+        c.village.destroying = true
+        c.village.destroyTimer = 3.0
+      }
+      // Tick village destroy timer — null village when animation finishes
+      if (c.village && c.village.destroying) {
+        c.village.destroyTimer -= dt
+        if (c.village.destroyTimer <= 0) {
+          c.village = null
+        }
       }
 
       // During catch-up, clear visual flags to prevent duplicate logs
@@ -507,6 +571,8 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         c.equipmentBroke = null
         c.equipmentLow = null
         c.justLeveledUp = null
+        c.villageClaimed = false
+        c.buildingComplete = null
       }
     }
 
@@ -530,7 +596,7 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
         for (let j = 0; j < creatures.length; j++) {
           const cr = creatures[j]
           if (!cr.alive || cr.sleeping || cr.eating || cr.gathering) continue
-          if (cr.inventory.length >= MAX_INVENTORY) continue
+          if (cr.inventory.length >= getMaxInventory(cr)) continue
 
           const dx = cr.x - di.x
           const dz = cr.z - di.z
@@ -538,6 +604,7 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
             const score = scoreItem(di.type, cr, speciesMemory)
             if (score > 15) {
               cr.inventory.push({ type: di.type })
+              trackGather(cr, 1)
               di.active = false
               di.popTimer = 0
               logRef.current.unshift({
@@ -687,6 +754,16 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
     if (saveTimer.current > 5.0) {
       saveTimer.current = 0
       const creatures = creaturesRef.current
+      // Debug: shelter count
+      let shelterCount = 0
+      for (let i = 0; i < creatures.length; i++) {
+        if (creatures[i].village) {
+          for (let j = 0; j < creatures[i].village.buildings.length; j++) {
+            if (creatures[i].village.buildings[j].type === 'shelter') shelterCount++
+          }
+        }
+      }
+      console.log(`[SHELTER] Total shelters across all creatures: ${shelterCount}`)
       saveCreatures(creatures)
       saveWorldClock(worldClockRef.current)
       saveResourceStates(resourceStatesRef.current)
@@ -700,6 +777,7 @@ export default function CreatureManager({ controlsRef, selectedId, followingId, 
     <>
       <FoodSources foodsRef={foodsRef} />
       <DroppedItems droppedItemsRef={droppedItemsRef} />
+      <VillageRenderer creaturesRef={creaturesRef} onSelectStorage={onSelectStorage} />
       {creaturesRef.current.map((c, i) => (
         <Creature
           key={c.id}

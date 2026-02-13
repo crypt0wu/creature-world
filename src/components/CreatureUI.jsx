@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import SPECIES from '../creatures/species'
-import { ITEM_DEFS, MAX_INVENTORY } from '../creatures/inventory'
+import { ITEM_DEFS } from '../creatures/inventory'
+import { getMaxInventory } from '../creatures/village'
 import { EQUIPMENT_DEFS, RECIPES, canCraft } from '../creatures/crafting'
 
 const FONT_HEADER = "'Chakra Petch', sans-serif"
@@ -47,7 +48,8 @@ function generateThinkingText(c) {
   const woodCount = counts.wood || 0
   const stoneCount = counts.stone || 0
   const herbCount = counts.herb || 0
-  const invFull = inv.length >= MAX_INVENTORY
+  const maxInv = getMaxInventory(c)
+  const invFull = inv.length >= maxInv
 
   // Winner standing still, watching prey flee, deciding
   if (c._chaseDelayTimer > 0) {
@@ -658,17 +660,19 @@ function HelpModal({ onClose }) {
 
 // ── Main UI Component ───────────────────────────────────────
 export default function CreatureUI({
-  creatures, selectedId, followingId,
-  onSelect, onFollow,
+  creatures, selectedId, followingId, selectedStorageId,
+  onSelect, onSelectStorage, onFollow,
   activityLog, worldClock, onReset,
 }) {
   const sel = creatures.find(c => c.id === selectedId)
   const selected = sel && sel.alive ? sel : null
   const thinkingText = selected ? generateThinkingText(selected) : null
+  const storageOwner = selectedStorageId ? creatures.find(c => c.id === selectedStorageId) : null
   const [showHelp, setShowHelp] = useState(false)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [showLog, setShowLog] = useState(true)
   const [hoveredSlot, setHoveredSlot] = useState(null)
+  const [hoveredStorageSlot, setHoveredStorageSlot] = useState(null)
 
   return (
     <div style={{
@@ -1088,11 +1092,11 @@ export default function CreatureUI({
                       Inventory
                     </span>
                     <span style={{ fontSize: '9px', color: '#557755', fontFamily: FONT_DATA }}>
-                      {selected.inventory?.length || 0}/{MAX_INVENTORY}
+                      {selected.inventory?.length || 0}/{getMaxInventory(selected)}
                     </span>
                   </div>
                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', position: 'relative' }}>
-                    {Array.from({ length: MAX_INVENTORY }, (_, i) => {
+                    {Array.from({ length: getMaxInventory(selected) }, (_, i) => {
                       const item = selected.inventory?.[i]
                       const itemType = item?.type || null
                       return (
@@ -1182,6 +1186,109 @@ export default function CreatureUI({
           </div>
         </div>
       )}
+
+      {/* ── Bottom: storage panel ── */}
+      {storageOwner && storageOwner.village && !selected && (() => {
+        const storageBuilding = storageOwner.village.buildings.find(b => b.type === 'storage')
+        if (!storageBuilding) return null
+        const items = storageBuilding.items || []
+        const ownerSpec = SPECIES[storageOwner.species]
+        const glowColor = ownerSpec?.glow || '#88aa88'
+        return (
+          <div style={{
+            position: 'absolute', bottom: '16px',
+            left: '50%', transform: 'translateX(-50%)',
+            pointerEvents: 'auto',
+          }}>
+            <div style={{ ...PANEL, width: '480px', padding: '10px 14px' }}>
+              {/* Header */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginBottom: '8px', borderBottom: '1px solid rgba(80, 200, 120, 0.15)',
+                paddingBottom: '6px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                  <span style={{
+                    color: glowColor,
+                    fontSize: '16px', fontWeight: 700, fontFamily: FONT_HEADER,
+                  }}>
+                    {storageOwner.name}'s Storage
+                  </span>
+                  <span style={{ color: '#557755', fontSize: '10px', fontFamily: FONT_DATA }}>
+                    {items.length}/20 items
+                  </span>
+                </div>
+                <button
+                  onClick={() => onSelectStorage(null)}
+                  style={{
+                    background: 'rgba(255, 100, 68, 0.1)',
+                    border: '1px solid rgba(255, 100, 68, 0.3)',
+                    color: '#cc6644', fontSize: '10px', padding: '3px 8px', borderRadius: '4px',
+                    cursor: 'pointer', fontFamily: FONT_DATA,
+                  }}
+                >
+                  x
+                </button>
+              </div>
+              {/* Item grid */}
+              {items.length === 0 ? (
+                <div style={{ color: '#445544', fontSize: '12px', fontStyle: 'italic', textAlign: 'center', padding: '12px 0' }}>
+                  Storage is empty
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', position: 'relative' }}>
+                  {items.map((item, i) => {
+                    const itemType = item?.type || null
+                    return (
+                      <div key={i}
+                        onMouseEnter={() => setHoveredStorageSlot(i)}
+                        onMouseLeave={() => setHoveredStorageSlot(null)}
+                        style={{
+                          width: '34px', height: '34px',
+                          borderRadius: '4px',
+                          border: `1px solid ${ITEM_BORDER_COLORS[itemType] || 'rgba(80, 200, 120, 0.3)'}`,
+                          background: ITEM_BG_COLORS[itemType] || 'rgba(0, 0, 0, 0.3)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          position: 'relative',
+                          cursor: 'help',
+                        }}>
+                        <ItemIcon type={itemType} />
+                        {hoveredStorageSlot === i && (
+                          <div style={{
+                            position: 'absolute',
+                            bottom: '40px', left: '50%', transform: 'translateX(-50%)',
+                            background: 'rgba(5, 10, 5, 0.95)',
+                            border: '1px solid rgba(80, 200, 120, 0.3)',
+                            borderRadius: '4px',
+                            padding: '5px 8px',
+                            fontFamily: FONT_DATA,
+                            fontSize: '10px',
+                            whiteSpace: 'nowrap',
+                            zIndex: 60,
+                            pointerEvents: 'none',
+                            backdropFilter: 'blur(4px)',
+                          }}>
+                            <span style={{
+                              color: ITEM_LABEL_COLORS[itemType] || '#88aa88',
+                              fontWeight: 'bold',
+                            }}>
+                              {ITEM_DEFS[itemType]?.label || itemType}
+                            </span>
+                            <span style={{ color: '#557755' }}> — </span>
+                            <span style={{ color: '#88aa88' }}>
+                              {ITEM_TOOLTIPS[itemType] || ''}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Reset confirmation ── */}
       {showResetConfirm && (

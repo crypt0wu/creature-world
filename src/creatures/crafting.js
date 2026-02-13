@@ -1,4 +1,4 @@
-import { MAX_INVENTORY } from './inventory'
+import { getMaxInventory, needsStorageMaterials } from './village'
 
 // ── Equipment slots ──────────────────────────────────────
 export const SLOT_WEAPON = 'weapon'
@@ -380,7 +380,7 @@ export function startCraft(c) {
   // Slot check: removing N materials, adding 1 item
   const matCount = totalMaterialCount(recipe)
   const netSlots = c.inventory.length - matCount + 1
-  if (netSlots > MAX_INVENTORY) return { started: false }
+  if (netSlots > getMaxInventory(c)) return { started: false }
 
   // Consume materials and energy
   consumeMaterials(c.inventory, recipe)

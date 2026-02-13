@@ -1,5 +1,6 @@
 import { startCraft, completeCraft, autoEquip } from '../crafting'
 import { markDecisionUseful } from '../scoring'
+import { needsStorageMaterials } from '../village'
 
 const CRAFT_COOLDOWN = 4
 const EQUIP_DELAY = 2 // seconds after crafting before auto-equip
@@ -43,7 +44,20 @@ export function updateCrafting(c, spec, dt) {
 
   // Skip starting new crafts during other activities or when tired
   if (c.sleeping || c.eating || c.gathering || c.seekingFood || c.seekingResource) return
+  if (c._returningHome) return    // Walking home to sleep — don't start crafting
+  if (c._returningToBuild) return // Walking home to build — don't start crafting
+  if (c._buildingType) return     // Currently building — don't start crafting
   if (c.energy < 25) return // Too tired to start crafting — prioritize rest
+
+  // Block crafting while saving materials for shelter or storage
+  if (c.village) {
+    let hasShelter = false
+    for (let i = 0; i < c.village.buildings.length; i++) {
+      if (c.village.buildings[i].type === 'shelter') { hasShelter = true; break }
+    }
+    if (!hasShelter) return // Don't craft anything — save materials for shelter
+  }
+  if (c.village && needsStorageMaterials(c)) return // Save materials for storage
 
   if (!c._craftCooldown) c._craftCooldown = 0
   c._craftCooldown -= dt

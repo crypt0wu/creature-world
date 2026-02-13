@@ -109,6 +109,19 @@ export function regenerateWorld() {
   _populate()
 }
 
+// ─── Active village positions for resource exclusion ────────
+// Set by CreatureManager each frame so respawn logic can avoid villages
+export let _activeVillages = []
+export function setActiveVillages(villages) { _activeVillages = villages }
+
+function isNearVillage(x, z, buffer) {
+  for (let i = 0; i < _activeVillages.length; i++) {
+    const dx = x - _activeVillages[i].x, dz = z - _activeVillages[i].z
+    if (dx * dx + dz * dz < buffer * buffer) return true
+  }
+  return false
+}
+
 // ─── Find a valid position for a resource to respawn ────────
 export function findValidResourcePosition(type) {
   const SPREAD = 160
@@ -121,6 +134,7 @@ export function findValidResourcePosition(type) {
     if ((type === 'rock' || type === 'bush') && y < -0.5) continue
 
     if (isNearPond(x, z, 4)) continue
+    if (isNearVillage(x, z, 8)) continue
 
     let blocked = false
     for (let i = 0; i < OBSTACLES.length; i++) {

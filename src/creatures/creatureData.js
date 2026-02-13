@@ -184,6 +184,16 @@ export function createCreature(speciesName, index, placedPositions) {
     justLeveledUp: null,
     // Direct float text from combat
     floatingText: null,
+    // Village
+    village: null,
+    _totalGathered: 0,
+    villageClaimed: false,
+    _returningHome: false,
+    _returningToBuild: false,
+    _buildingType: null,
+    _buildingTimer: 0,
+    _buildingDuration: 0,
+    buildingComplete: null,
   }
 }
 

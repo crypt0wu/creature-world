@@ -1,6 +1,7 @@
 import { PONDS, OBSTACLES } from '../../worldData'
 import { getTerrainHeight } from '../../components/Terrain'
 import { tryPickupBerry, eatFromInventory } from '../inventory'
+import { isNearCampfire } from '../village'
 
 const WORLD_HALF = 95
 const FOOD_COUNT = 10
@@ -75,14 +76,19 @@ export function updateHunger(c, spec, dt, foods, allCreatures) {
   if (!c.alive) return
   if (c.sleeping) return
   if (c.gathering) return
+  if (c._buildingType) return
+
+  const campfireMult = isNearCampfire(c) ? 0.7 : 1.0
+  const hungerDrain = spec.hungerDrain * campfireMult
+
   if (c.crafting) {
     // Still drain hunger while crafting, but don't seek food
-    c.hunger = Math.max(0, c.hunger - dt * spec.hungerDrain)
+    c.hunger = Math.max(0, c.hunger - dt * hungerDrain)
     return
   }
 
   // Drain hunger
-  c.hunger = Math.max(0, c.hunger - dt * spec.hungerDrain)
+  c.hunger = Math.max(0, c.hunger - dt * hungerDrain)
 
   // Currently eating — stay put, shrink food, restore hunger when done
   if (c.eating) {
@@ -142,6 +148,18 @@ export function updateHunger(c, spec, dt, foods, allCreatures) {
     }
     return
   }
+
+  // Starving while walking home — cancel return, prioritize food
+  if (c._returningHome && c.hunger < 10) {
+    c._returningHome = false
+  }
+  if (c._returningToBuild && c.hunger < 10) {
+    c._returningToBuild = false
+  }
+
+  // While returning home, don't seek food unless starving (handled above)
+  if (c._returningHome) return
+  if (c._returningToBuild) return
 
   // Eat from inventory before seeking food on the map
   if (c.hunger < 40 && !c.seekingFood && c.inventory.length > 0) {
@@ -222,6 +240,11 @@ export function updateHunger(c, spec, dt, foods, allCreatures) {
       c.currentSpeed = 0
       c.seekingFood = false
       c.eating = false
+      if (c.village && !c.village.destroying) {
+        console.log(`[VILLAGE] ${c.name} died, village destroying`)
+        c.village.destroying = true
+        c.village.destroyTimer = 3.0
+      }
     }
   }
 }

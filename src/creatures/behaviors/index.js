@@ -16,7 +16,7 @@ export function updateCreature(c, allCreatures, spec, dt, foods, resourceStates,
   c.phase += dt
 
   // Energy runs first — it affects speed + can trigger sleep
-  updateEnergy(c, spec, dt)
+  updateEnergy(c, spec, dt, allCreatures)
 
   // Auto-use potions when hurt — runs regardless of activity (except sleeping)
   // Timed: 3-4 seconds to drink, can be interrupted by combat
@@ -55,6 +55,9 @@ export function updateCreature(c, allCreatures, spec, dt, foods, resourceStates,
     else if (c.eating) c.state = 'eating'
     else if (c.gathering) c.state = 'gathering'
     else if (c.crafting) c.state = 'crafting'
+    else if (c._buildingType) c.state = 'building'
+    else if (c._returningToBuild) c.state = 'returning to build'
+    else if (c._returningHome) c.state = 'returning home'
     else if (c.seekingFood) c.state = 'seeking food'
     else if (c.seekingResource) c.state = 'seeking resource'
     else if (c.hunger < 25) c.state = 'hungry'

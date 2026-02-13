@@ -122,6 +122,9 @@ function interruptActivity(c) {
   }
   if (c.seekingResource) { c.seekingResource = false; c.targetResourceIdx = -1; c.targetResourceType = ''; c._gatherGoal = null }
   if (c.seekingFood) { c.seekingFood = false; c.targetFoodIdx = -1 }
+  c._returningHome = false
+  c._returningToBuild = false
+  if (c._buildingType) { c._buildingType = null; c._buildingTimer = 0; c._buildingDuration = 0 }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -577,6 +580,11 @@ export function updateCombat(c, allCreatures, spec, dt) {
       target._combatTarget = null
       target.deathCause = 'combat'
       target.killedBy = c.name
+      if (target.village && !target.village.destroying) {
+        console.log(`[VILLAGE] ${target.name} died, village destroying`)
+        target.village.destroying = true
+        target.village.destroyTimer = 3.0
+      }
       c.xp += target.level * 25
       c.kills++
       c._combatCooldown = COMBAT_COOLDOWN

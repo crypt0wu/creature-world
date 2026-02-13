@@ -1,6 +1,7 @@
 import { WORLD_ITEMS } from '../../worldData'
-import { MAX_INVENTORY, trySmartPickup } from '../inventory'
+import { trySmartPickup } from '../inventory'
 import { getBestGoalRecipe } from '../crafting'
+import { trackGather, needsCampfireWood, needsStorageMaterials, getStorageNeed, getMaxInventory } from '../village'
 import { scoreItem, wouldGatherBeUseful } from '../scoring'
 
 // ── Resource config ─────────────────────────────────────────
@@ -19,6 +20,103 @@ const MATERIAL_TO_RESOURCE = { wood: 'tree', stone: 'rock', herb: 'bush' }
 export function updateGathering(c, spec, dt, resourceStates, allCreatures, speciesMemory) {
   if (!c.alive || c.sleeping || c.eating || c.seekingFood || c.crafting) return
   if (c._scaredTimer > 0) return  // Scared creatures don't gather — run first
+  if (c._returningHome) return    // Walking home to sleep — don't start gathering
+  if (c._returningToBuild) return // Walking home to build — don't start gathering
+  if (c._buildingType) return     // Currently building — don't gather
+
+  // ── Shelter urgency: aggressively seek ONLY wood/stone ──
+  if (c.village && c.energy > 15) {
+    let hasShelter = false
+    for (let i = 0; i < c.village.buildings.length; i++) {
+      if (c.village.buildings[i].type === 'shelter') { hasShelter = true; break }
+    }
+    if (!hasShelter) {
+      let wood = 0, stone = 0
+      for (let i = 0; i < c.inventory.length; i++) {
+        if (c.inventory[i].type === 'wood') wood++
+        if (c.inventory[i].type === 'stone') stone++
+      }
+      if (wood < 5 || stone < 3) {
+        const needType = wood < 5 ? 'tree' : 'rock'
+        const needItem = wood < 5 ? 'wood' : 'stone'
+
+        // Cancel if currently seeking the WRONG resource type (herbs, etc)
+        if (c.seekingResource && !c.gathering && c.targetResourceType !== needType) {
+          console.log(`[VILLAGE] ${c.name} cancelling ${c.targetResourceType} seek — need ${needItem} for shelter`)
+          _clearGather(c, resourceStates)
+          // Fall through to pick the right one
+        }
+
+        if (!c.seekingResource && !c.gathering) {
+          // Strict search: ONLY this exact type, no fallback
+          const targetIdx = _findStrictResource(c, needType, resourceStates)
+          if (targetIdx >= 0) {
+            console.log(`[VILLAGE] ${c.name} needs shelter, seeking ${needItem}, have ${wood} wood, ${stone} stone`)
+            c.seekingResource = true
+            c.targetResourceIdx = targetIdx
+            c.targetResourceType = needType
+            resourceStates[targetIdx].gathererId = c.id
+            c._gatherGoal = { action: 'gather', resourceType: needType, reason: `Need ${needItem} for shelter (${wood}/5 wood, ${stone}/3 stone)` }
+            c.pause = 0
+            return
+          }
+          // No trees/rocks nearby — don't gather anything else, just wait
+          return
+        }
+      }
+    }
+  }
+
+  // ── Campfire wood urgency: prefer wood when campfire needed ──
+  if (c.village && c.energy > 15 && needsCampfireWood(c)) {
+    if (!c.seekingResource && !c.gathering) {
+      const targetIdx = _findStrictResource(c, 'tree', resourceStates)
+      if (targetIdx >= 0) {
+        let wood = 0
+        for (let i = 0; i < c.inventory.length; i++) {
+          if (c.inventory[i].type === 'wood') wood++
+        }
+        console.log(`[VILLAGE] ${c.name} needs campfire, seeking wood, have ${wood}/3 wood`)
+        c.seekingResource = true
+        c.targetResourceIdx = targetIdx
+        c.targetResourceType = 'tree'
+        resourceStates[targetIdx].gathererId = c.id
+        c._gatherGoal = { action: 'gather', resourceType: 'tree', reason: `Need wood for campfire (${wood}/3 wood)` }
+        c.pause = 0
+        return
+      }
+      // No trees available — let normal gathering proceed (don't block like shelter)
+    }
+  }
+
+  // ── Storage material urgency: hard override for wood/stone ──
+  if (c.village && c.energy > 15 && needsStorageMaterials(c)) {
+    const need = getStorageNeed(c)
+    const needType = need.needWood ? 'tree' : 'rock'
+    const needItem = need.needWood ? 'wood' : 'stone'
+
+    // Cancel if currently seeking the WRONG resource type
+    if (c.seekingResource && !c.gathering && c.targetResourceType !== needType) {
+      console.log(`[VILLAGE] ${c.name} cancelling ${c.targetResourceType} seek — need ${needItem} for storage`)
+      _clearGather(c, resourceStates)
+    }
+
+    if (!c.seekingResource && !c.gathering) {
+      const targetIdx = _findStrictResource(c, needType, resourceStates)
+      if (targetIdx >= 0) {
+        console.log(`[VILLAGE] ${c.name} needs storage, seeking ${needItem}, have ${need.wood}/8 wood, ${need.stone}/2 stone`)
+        c.seekingResource = true
+        c.targetResourceIdx = targetIdx
+        c.targetResourceType = needType
+        resourceStates[targetIdx].gathererId = c.id
+        c._gatherGoal = { action: 'gather', resourceType: needType, reason: `Need ${needItem} for storage (${need.wood}/8 wood, ${need.stone}/2 stone)` }
+        c.pause = 0
+        return
+      }
+      // No trees/rocks available — don't gather anything else, just wait
+      return
+    }
+  }
 
   // ── Active gathering ──────────────────────────────────────
   if (c.gathering) {
@@ -90,6 +188,9 @@ export function updateGathering(c, spec, dt, resourceStates, allCreatures, speci
         rs.needsRelocation = true
       }
 
+      // Track lifetime gathers for village claiming
+      trackGather(c, pushed)
+
       // Set flags for visual/logging
       c.gatherResult = { type: cfg.item, qty: pushed }
       c.gatherDone = true
@@ -140,6 +241,10 @@ export function updateGathering(c, spec, dt, resourceStates, allCreatures, speci
   if (goal.action === 'gather') {
     const targetIdx = _findBestResource(c, goal.resourceType, resourceStates, allCreatures)
     if (targetIdx >= 0) {
+      const _hasShelter = c.village ? c.village.buildings.some(b => b.type === 'shelter') : true
+      let _w = 0, _s = 0
+      for (let i = 0; i < c.inventory.length; i++) { if (c.inventory[i].type === 'wood') _w++; if (c.inventory[i].type === 'stone') _s++ }
+      console.log(`[SEEK] ${c.name} chose to seek ${WORLD_ITEMS[targetIdx].type} at (${WORLD_ITEMS[targetIdx].pos[0].toFixed(0)},${WORLD_ITEMS[targetIdx].pos[2].toFixed(0)}), hasShelter=${_hasShelter ? 'yes' : 'no'}, wood=${_w}, stone=${_s}`)
       c.seekingResource = true
       c.targetResourceIdx = targetIdx
       c.targetResourceType = WORLD_ITEMS[targetIdx].type
@@ -156,7 +261,36 @@ export function updateGathering(c, spec, dt, resourceStates, allCreatures, speci
 
 // ── The Decision Engine ─────────────────────────────────────
 function _planNextAction(c, resourceStates, allCreatures, speciesMemory) {
-  const invFull = c.inventory.length >= MAX_INVENTORY
+  const invFull = c.inventory.length >= getMaxInventory(c)
+
+  // Step 0: Need shelter? Prioritize wood/stone
+  if (c.village) {
+    let hasShelter = false
+    for (let i = 0; i < c.village.buildings.length; i++) {
+      if (c.village.buildings[i].type === 'shelter') { hasShelter = true; break }
+    }
+    if (!hasShelter) {
+      let wood = 0, stone = 0
+      for (let i = 0; i < c.inventory.length; i++) {
+        if (c.inventory[i].type === 'wood') wood++
+        if (c.inventory[i].type === 'stone') stone++
+      }
+      if (wood < 5 && _hasAvailableResource('tree', c, resourceStates)) {
+        return {
+          action: 'gather', resourceType: 'tree', materialNeeded: 'wood',
+          reason: `Need ${5 - wood} more wood for shelter`,
+          recipeId: null, priority: 0.9,
+        }
+      }
+      if (stone < 3 && _hasAvailableResource('rock', c, resourceStates)) {
+        return {
+          action: 'gather', resourceType: 'rock', materialNeeded: 'stone',
+          reason: `Need ${3 - stone} more stone for shelter`,
+          recipeId: null, priority: 0.9,
+        }
+      }
+    }
+  }
 
   // Step 1: Can I craft something useful RIGHT NOW?
   const goalRecipe = getBestGoalRecipe(c)
@@ -242,6 +376,22 @@ function _planNextAction(c, resourceStates, allCreatures, speciesMemory) {
   else if (!invFull) idleReason = 'Equipped. Gathering materials for potions.'
   else idleReason = 'Fully stocked. Exploring the area.'
   return { action: 'idle', reason: idleReason, priority: 0.0 }
+}
+
+// ── Strict search: nearest resource of EXACT type, no fallback ──
+function _findStrictResource(c, resourceType, resourceStates) {
+  let bestDist = Infinity
+  let bestIdx = -1
+  for (let i = 0; i < WORLD_ITEMS.length; i++) {
+    const rs = resourceStates[i]
+    if (!rs || rs.depleted || rs.beingGathered) continue
+    if (WORLD_ITEMS[i].type !== resourceType) continue
+    const dx = WORLD_ITEMS[i].pos[0] - c.x
+    const dz = WORLD_ITEMS[i].pos[2] - c.z
+    const dist = dx * dx + dz * dz
+    if (dist < bestDist) { bestDist = dist; bestIdx = i }
+  }
+  return bestIdx
 }
 
 // ── Quick check: any available resource of this type nearby? ──

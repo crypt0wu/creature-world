@@ -1,6 +1,7 @@
 import { evaluateDrop, recordDecision } from './scoring'
+import { trackGather, getMaxInventory } from './village'
 
-export const MAX_INVENTORY = 8
+export const MAX_INVENTORY = 12
 
 export const ITEM_DEFS = {
   wood:            { label: 'Wood' },
@@ -37,14 +38,15 @@ export function countItemsByType(c, type) {
 }
 
 export function tryPickupBerry(c) {
-  if (c.inventory.length >= MAX_INVENTORY) return false
+  if (c.inventory.length >= getMaxInventory(c)) return false
   if (Math.random() >= getPickupChance(c.personality)) return false
   c.inventory.push({ type: 'berry', hungerRestore: 60 })
+  trackGather(c, 1)
   return true
 }
 
 export function trySmartPickup(c, itemType, speciesMemory) {
-  if (c.inventory.length < MAX_INVENTORY) {
+  if (c.inventory.length < getMaxInventory(c)) {
     c.inventory.push({ type: itemType })
     return { picked: true, dropped: null }
   }

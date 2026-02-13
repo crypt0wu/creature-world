@@ -25,7 +25,7 @@ function clampTarget(target) {
   target.z = Math.max(-CAM_BOUNDS, Math.min(CAM_BOUNDS, target.z))
 }
 
-function Scene({ selectedId, followingId, onSelect, onSync, resetKey, resourceStatesRef, speedRef, debugRef, debugOpen, showAllThinking }) {
+function Scene({ selectedId, followingId, onSelect, onSelectStorage, onSync, resetKey, resourceStatesRef, speedRef, debugRef, debugOpen, showAllThinking }) {
   const controlsRef = useRef()
   const idleTimer = useRef(null)
   const { camera } = useThree()
@@ -232,6 +232,7 @@ function Scene({ selectedId, followingId, onSelect, onSync, resetKey, resourceSt
         selectedId={selectedId}
         followingId={followingId}
         onSelect={onSelect}
+        onSelectStorage={onSelectStorage}
         onSync={onSync}
         resourceStatesRef={resourceStatesRef}
         speedRef={speedRef}
@@ -307,6 +308,7 @@ export default function App() {
   const [displayData, setDisplayData] = useState({ creatures: [], worldClock: 0, log: [] })
   const [selectedId, setSelectedId] = useState(null)
   const [followingId, setFollowingId] = useState(null)
+  const [selectedStorageId, setSelectedStorageId] = useState(null)
   const [resetKey, setResetKey] = useState(0)
   const [debugOpen, setDebugOpen] = useState(false)
   const [showAllThinking, setShowAllThinking] = useState(false)
@@ -329,12 +331,20 @@ export default function App() {
     regenerateWorld()
     setSelectedId(null)
     setFollowingId(null)
+    setSelectedStorageId(null)
     setDisplayData({ creatures: [], worldClock: 0, log: [] })
     setResetKey(k => k + 1)
   }, [])
 
   const handleSelect = useCallback((id) => {
     setSelectedId(prev => prev === id ? null : id)
+    setSelectedStorageId(null) // close storage when selecting creature
+  }, [])
+
+  const handleSelectStorage = useCallback((creatureId) => {
+    setSelectedStorageId(prev => prev === creatureId ? null : creatureId)
+    setSelectedId(null) // close creature panel when selecting storage
+    setFollowingId(null)
   }, [])
 
   return (
@@ -349,12 +359,13 @@ export default function App() {
           scene.fog = new THREE.FogExp2('#0b140b', 0.002)
           scene.background = new THREE.Color('#050508')
         }}
-        onPointerMissed={() => { setSelectedId(null); setFollowingId(null); clearHover() }}
+        onPointerMissed={() => { setSelectedId(null); setFollowingId(null); setSelectedStorageId(null); clearHover() }}
       >
         <Scene
           selectedId={selectedId}
           followingId={followingId}
           onSelect={handleSelect}
+          onSelectStorage={handleSelectStorage}
           onSync={handleSync}
           resetKey={resetKey}
           resourceStatesRef={resourceStatesRef}
@@ -371,7 +382,9 @@ export default function App() {
         creatures={displayData.creatures}
         selectedId={selectedId}
         followingId={followingId}
+        selectedStorageId={selectedStorageId}
         onSelect={handleSelect}
+        onSelectStorage={handleSelectStorage}
         onFollow={setFollowingId}
         activityLog={displayData.log}
         worldClock={displayData.worldClock}

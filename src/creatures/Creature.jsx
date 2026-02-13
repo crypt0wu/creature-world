@@ -249,7 +249,6 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
       else if (creature.eating) emTarget = 1.5
       else if (creature.gathering) emTarget = 1.2
       else if (creature.crafting) emTarget = 1.4 + Math.sin(creature.phase * 3) * 0.3
-
       // Crystal flash override
       if (crystalFlash.current > 0) {
         emTarget = 3.0
@@ -563,6 +562,17 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
       crystalFlash.current = 0.2
     }
 
+    // ── Building complete: floating text ──
+    if (creature.buildingComplete) {
+      const bld = creature.buildingComplete
+      creature.buildingComplete = null
+      floatTimer.current = 2.0
+      floatValue.current = 0
+      floatColor.current = '#44ff88'
+      floatLabel.current = `${bld.label} built!`
+      _spawnBiteParticles('#ffcc44')
+    }
+
     // ── Equipment broke: floating text + shattering particle burst ──
     if (creature.equipmentBroke) {
       const broke = creature.equipmentBroke
@@ -656,6 +666,13 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
         }
       } else if (creature.crafting && creature.craftDuration > 0) {
         const pct = Math.min(1, 1 - Math.max(0, creature.craftTimer) / creature.craftDuration)
+        progressRef.current.style.display = 'block'
+        if (progressBarRef.current) {
+          progressBarRef.current.style.width = `${pct * 100}%`
+          progressBarRef.current.style.background = '#ffcc44'
+        }
+      } else if (creature._buildingType && creature._buildingDuration > 0) {
+        const pct = Math.min(1, 1 - Math.max(0, creature._buildingTimer) / creature._buildingDuration)
         progressRef.current.style.display = 'block'
         if (progressBarRef.current) {
           progressBarRef.current.style.width = `${pct * 100}%`
@@ -808,6 +825,9 @@ export default function Creature({ creaturesRef, index, isSelected, onSelect, sh
                   : display.state === 'fleeing' ? '#ff8844'
                   : display.state === 'scared' ? '#ff8844'
                   : display.state === 'drinking potion' ? '#44ff88'
+                  : display.state === 'returning home' ? '#aaddff'
+                  : display.state === 'returning to build' ? '#ffcc44'
+                  : display.state === 'building' ? '#ffcc44'
                   : '#666',
                 textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '6px',
                 textShadow: '0 0 4px rgba(0,0,0,0.8)',
